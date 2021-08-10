@@ -1,0 +1,132 @@
+:root {
+	--orange-color: #f58320;
+	--orange-color-2: #d4680a;
+	--orange-color-light: #feecdc;
+	--transition-all: all .15s ease;
+}
+
+@media (min-width: 992px){
+.login.login-1 .login-aside {
+    max-width: 50%;
+}
+}
+
+.order-history .row:not(:last-child) {
+    margin-bottom: 1rem;
+}
+.order-history .d-flex:not(:last-child) {
+    margin-bottom: .5rem;
+}
+
+.cursor-default{
+	cursor: default !important;
+}
+
+.hide{
+	display: none !important;
+}
+
+.form-control-xs{
+	height: calc(1.43em + .375rem + 2px) !important;
+    padding: .125rem .25rem !important;
+    line-height: 1.5;
+    border-radius: .2rem
+}
+
+.tinymce.message-team+.tox-tinymce{
+	/* height: auto !important; */
+	/* min-height: 200px; */
+	/* overflow: auto !important; */
+}
+
+.label.label-success2 {
+    color: #fff;
+    background-color: #28a745;
+}
+.label.label-inline.label-lg {
+    height: auto;
+    padding: 0.35rem 0.75rem !important;
+}
+
+.d-table .d-table-cell {
+    padding: .75rem;
+    vertical-align: top;
+    border-bottom: 1px solid #ebedf3;
+}
+
+body.editor .column-pay_rate{
+	display: none !important;
+}
+
+.message-text > p:last-child{
+	margin-bottom: 0;
+}
+
+.btn.btn-success2{
+	background-color: #28a745;
+    border-color: #28a745;
+}
+.btn.btn-success2.focus:not(.btn-text),
+.btn.btn-success2:focus:not(.btn-text),
+.btn.btn-success2:hover:not(.btn-text):not(:disabled):not(.disabled),
+.btn.btn-success2.disabled, .btn.btn-success2:disabled{
+    background-color: #2ba728;
+    border-color: #2ba728;
+}
+
+.modal-order_details-loader .spinner:before{
+	width: inherit;
+	height: inherit;
+}
+
+.wordagents-logo{
+	max-width: 168px;
+    max-height: 70px;
+}
+.btn.btn-primary{
+	background: var(--orange-color);
+    border: 1px solid var(--orange-color);
+}
+.btn.btn-primary.disabled, .btn.btn-primary:disabled {
+	background: var(--orange-color);
+    border-color: var(--orange-color);
+}
+.btn.btn-primary.focus:not(.btn-text),
+.btn.btn-primary:focus:not(.btn-text),
+.btn.btn-primary:hover:not(.btn-text):not(:disabled):not(.disabled){
+	background: var(--orange-color-2);
+    border: 1px solid var(--orange-color-2);
+}
+
+.btn.btn-light-primary {
+    color: var(--orange-color);
+    background-color: var(--orange-color-light);
+}
+.btn.btn-light-primary.focus:not(.btn-text),
+.btn.btn-light-primary:focus:not(.btn-text),
+.btn.btn-light-primary:hover:not(.btn-text):not(:disabled):not(.disabled){
+	background-color: var(--orange-color);
+}
+.tag-delete:after {
+    transition: all 0.2s ease;
+    content: " ";
+}
+.tag-delete:not(.disabled):after{
+    color: #fff;	
+}
+.tag-delete:hover:after,
+.tag-delete.active:after {
+    content: "\00d7";
+    margin-left: 0.25rem;
+}
+
+button[type="submit"].disabled {
+    pointer-events: none;
+}
+
+.btn.btn-light-primary .svg-icon svg g [fill]{
+	fill: var(--orange-color);
+}
+.btn.btn-light-primary.dropdown-toggle:after{
+	color: var(--orange-color);
+}
