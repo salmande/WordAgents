@@ -137,6 +137,14 @@ var KTLogin = function() {
 							}
 						}
 					},
+					role: {
+						validators: {
+							notEmpty: {
+								message: 'Role is required' // DEv3
+							}
+						}
+					},
+
                     password: {
                         validators: {
                             notEmpty: {

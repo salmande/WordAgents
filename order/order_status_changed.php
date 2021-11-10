@@ -46,6 +46,9 @@ if( $order_articles_num > 1 )
 $tags_add[] = $tag_bulk_order;
 
 $order = wad_get_order($order_id);
+if( empty($order) )
+die();
+
 $spp_date_due = $order['spp_date_due'];
 
 $test_clients_array = array(4182,19, 2571, 3517);
@@ -79,6 +82,9 @@ $test_clients_array = array(4182,19, 2571, 3517);
 	$assigned_editors_ids_old = wad_get_assigned_editors_ids($order_id);
 	$status_old = (int) $order['status'];
 	$doc_link = $order['doc_link'];
+	
+	//Add doc link if not available
+	wad_add_order_doc_link_if_not_avail($order_id, $doc_link);
 
 	$status_to = $status;
 	$status_from = $status_old;
@@ -272,7 +278,7 @@ $test_clients_array = array(4182,19, 2571, 3517);
 	$date_due_timestamp = wad_get_new_orders_due_timestamp($order_words);
 
 	if( $status == 2 ) //Submitted
-	{ 
+	{
 		$set .= ", started='{$current_timestamp}', due_in='{$current_timestamp}', due_in_end='{$date_due_timestamp}'";
 		
 		wad_spp_update_order($order_id, array('note' => ''));
@@ -280,19 +286,49 @@ $test_clients_array = array(4182,19, 2571, 3517);
 		if( wad_get_option('save_log') == 'yes' )
 		{
 			wad_insert_query( "logs",
-				array( "from_type", "action", "source", "source_id", "time"),
-				array( "system", "deleted note", "order", $order_id, $current_timestamp)
+				array( "from_type", "action", "source", "source_id", "time","data"),
+				array( "system", "deleted note", "order", $order_id, $current_timestamp,"")
 			);
 		}
 	}
 	elseif( $status == 5) //Working
 	{
 		if( !empty($assigned_writers) )
-		{				
-			if( ! $has_tag_Editor_Revision ){
-				$set .= ", assigned='{$current_timestamp}', assigned_end='{$date_due_timestamp}', date_due='{$date_due_timestamp}'";	
+		{	
+			// Set due date, claim and submit time of Working, ReadyToEdit and EditorRevision orders - START
+			if( $InstructionReview_To_Working || $Submitted_To_Working
+			){
+				$date_due = $date_due_timestamp;
+			}else{
+				$date_due = $spp_date_due;
+			}
+			
+			if( $InstructionReview_To_Working
+				|| $InstructionReview_To_ReadyToEdit
+				|| $InstructionReview_To_EditorRevision
+				|| $Submitted_To_Working
+				|| $Submitted_To_ReadyToEdit
+				|| $Submitted_To_EditorRevision
+			){
+				$set .= ", assigned='{$current_timestamp}', assigned_end='{$date_due_timestamp}', date_due='{$date_due}'";	
+			}
+			
+			if( $InstructionReview_To_ReadyToEdit
+				|| $InstructionReview_To_EditorRevision
+				|| $Submitted_To_ReadyToEdit
+				|| $Submitted_To_EditorRevision
+			){
+				$writer_submit_time_end = wad_get_due_timestamp();
+				$set .= ", writer_submit_time='{$current_timestamp}', writer_submit_time_end='{$writer_submit_time_end}'";	
 			}
 
+			if( $InstructionReview_To_EditorRevision || $Submitted_To_EditorRevision )
+			{
+				$editor_claim_time_end = wad_get_due_timestamp();
+				$set .= ", editor_claim_time='{$current_timestamp}', editor_claim_time_end='{$editor_claim_time_end}'";	
+			}
+			// End - Set due date, claim and submit time of Working, ReadyToEdit and EditorRevision orders
+			
 			//Get orders note
 			if(
 				$Submitted_To_Working
@@ -313,7 +349,6 @@ $test_clients_array = array(4182,19, 2571, 3517);
 				);
 								
 				$note = wad_get_note_for_working_order( $data_get_note_for_working_order );
-				$note .= '<br><a href="'.$doc_link.'" target="_blank">'.$doc_link.'</a>';
 			}
 			
 			$data_spp_update_woring_order = array(
@@ -349,19 +384,49 @@ $test_clients_array = array(4182,19, 2571, 3517);
 		}
 	}
 	elseif( $status == 12) // Editing
-	{			
+	{
+		//Set due date, claim and submit time of Editing orders - START
+		
+		$date_due = $spp_date_due;
+			
+		if( $InstructionReview_To_Editing
+			|| $Submitted_To_Editing
+		){
+			$set .= ", assigned='{$current_timestamp}', assigned_end='{$date_due_timestamp}', date_due='{$date_due}'";	
+		}
+		
+		if( $InstructionReview_To_Editing
+			|| $Submitted_To_Editing
+			|| $Working_To_Editing 
+		){
+			$writer_submit_time_end = wad_get_due_timestamp();
+			$set .= ", writer_submit_time='{$current_timestamp}', writer_submit_time_end='{$writer_submit_time_end}'";	
+		}
+
+		if( $InstructionReview_To_Editing
+			|| $Submitted_To_Editing
+			|| $Working_To_Editing
+			|| $ReadyToEdit_To_Editing
+		){
+			$editor_claim_time_end = wad_get_due_timestamp();
+			$set .= ", editor_claim_time='{$current_timestamp}', editor_claim_time_end='{$editor_claim_time_end}'";	
+		}
+		
+		//End - Set due date, claim and submit time of Editing orders
+		
 		//Update order note when status changed to Editing from Working
 		if( $Working_To_Editing )
 		{
-			$note .= '<br><a href="'.$doc_link.'" target="_blank">'.$doc_link.'</a>';
-			wad_spp_update_working_order( array( 'order_id' => $order_id, 'note' => $note, 'note_log_action' => 'updated note' ) );
+			// if($doc_link)
+			// $note .= '<br><a href="'.$doc_link.'" target="_blank">'.$doc_link.'</a>';
+			// wad_spp_update_working_order( array( 'order_id' => $order_id, 'note' => $note, 'note_log_action' => 'updated note' ) );
 		}
 		
 		//Add order note when status changed to Editing from Submitted
 		if( !empty($assigned_writers) &&
 			( $Submitted_To_Editing
 			|| $InstructionReview_To_Editing
-			) 
+			)
 		){
 			$data_get_note_for_working_order = array(
 				'order_id' => $order_id,
@@ -370,14 +435,44 @@ $test_clients_array = array(4182,19, 2571, 3517);
 				'date_due_timestamp' => $date_due_timestamp,
 			);
 			$note = wad_get_note_for_working_order( $data_get_note_for_working_order );
-			$note .= '<br><a href="'.$doc_link.'" target="_blank">'.$doc_link.'</a>';
 			wad_spp_update_working_order( array( 'order_id' => $order_id, 'note' => $note, 'note_log_action' => 'added note' ) );
 		}
 	}
 	else if($status == 3 ) //Complete
-	{			
+	{	
+		//Set due date, claim and submit time of Complete orders - START
+	
+		$date_due = $spp_date_due;
+			
+		if( $InstructionReview_To_Complete
+			|| $Submitted_To_Complete
+		){
+			$set .= ", assigned='{$current_timestamp}', assigned_end='{$date_due_timestamp}', date_due='{$date_due}'";	
+		}
+		
+		if( $InstructionReview_To_Complete
+			|| $Submitted_To_Complete
+			|| $Working_To_Complete
+		){
+			$writer_submit_time_end = wad_get_due_timestamp();
+			$set .= ", writer_submit_time='{$current_timestamp}', writer_submit_time_end='{$writer_submit_time_end}'";	
+		}
+
+		if( $InstructionReview_To_Complete
+			|| $Submitted_To_Complete
+			|| $Working_To_Complete
+			|| $ReadyToEdit_To_Complete
+		){
+			$editor_claim_time_end = wad_get_due_timestamp();
+			$set .= ", editor_claim_time='{$current_timestamp}', editor_claim_time_end='{$editor_claim_time_end}'";	
+		}
+		
+		// END - Set due date, claim and submit time of Complete orders
+	
 		//Add order note when status changed to Complete from Submitted
-		if( $Submitted_To_Complete || $InstructionReview_To_Complete )
+		if( !empty($assigned_writers) &&
+			( $Submitted_To_Complete || $InstructionReview_To_Complete )
+		)
 		{
 			$data_get_note_for_working_order = array(
 				'order_id' => $order_id,
@@ -386,20 +481,47 @@ $test_clients_array = array(4182,19, 2571, 3517);
 				'date_due_timestamp' => $date_due_timestamp,
 			);
 			$note = wad_get_note_for_working_order( $data_get_note_for_working_order );
-			$note .= '<br><a href="'.$doc_link.'" target="_blank">'.$doc_link.'</a>';
 			wad_spp_update_working_order( array( 'order_id' => $order_id, 'note' => $note, 'note_log_action' => 'added note' ) );
 		}
 		
 		//Update order note when status changed to Complete from Working
 		if( $Working_To_Complete ){
-			$note .= '<br><a href="'.$doc_link.'" target="_blank">'.$doc_link.'</a>';
-			wad_spp_update_working_order( array( 'order_id' => $order_id, 'note' => $note, 'note_log_action' => 'updated note' ) );
+			// if($doc_link)
+			// $note .= '<br><a href="'.$doc_link.'" target="_blank">'.$doc_link.'</a>';
+			// wad_spp_update_working_order( array( 'order_id' => $order_id, 'note' => $note, 'note_log_action' => 'updated note' ) );
 		}
 		
 	}else if($status == 9 ) //Revision
-	{			
+	{
+		$date_due = $spp_date_due;
+			
+		if( $InstructionReview_To_Revision
+			|| $Submitted_To_Revision
+		){
+			$set .= ", assigned='{$current_timestamp}', assigned_end='{$date_due_timestamp}', date_due='{$date_due}'";	
+		}
+		
+		if( $InstructionReview_To_Revision
+			|| $Submitted_To_Revision
+			|| $Working_To_Revision
+		){
+			$writer_submit_time_end = wad_get_due_timestamp();
+			$set .= ", writer_submit_time='{$current_timestamp}', writer_submit_time_end='{$writer_submit_time_end}'";	
+		}
+
+		if( $InstructionReview_To_Revision
+			|| $Submitted_To_Revision
+			|| $Working_To_Revision
+			|| $ReadyToEdit_To_Revision
+		){
+			$editor_claim_time_end = wad_get_due_timestamp();
+			$set .= ", editor_claim_time='{$current_timestamp}', editor_claim_time_end='{$editor_claim_time_end}'";	
+		}
+		
 		//Add order note when status changed to Revision from Submitted
-		if( $Submitted_To_Revision || $InstructionReview_To_Revision )
+		if( !empty($assigned_writers) &&
+			( $Submitted_To_Revision || $InstructionReview_To_Revision )
+		)
 		{
 			$data_get_note_for_working_order = array(
 				'order_id' => $order_id,
@@ -408,14 +530,14 @@ $test_clients_array = array(4182,19, 2571, 3517);
 				'date_due_timestamp' => $date_due_timestamp,
 			);
 			$note = wad_get_note_for_working_order( $data_get_note_for_working_order );
-			$note .= '<br><a href="'.$doc_link.'" target="_blank">'.$doc_link.'</a>';
 			wad_spp_update_working_order( array( 'order_id' => $order_id, 'note' => $note, 'note_log_action' => 'added note' ) );
 		}
 		
 		//Update order note when status changed to Revision from Working
 		if( $Working_To_Revision ){
-			$note .= '<br><a href="'.$doc_link.'" target="_blank">'.$doc_link.'</a>';
-			wad_spp_update_working_order( array( 'order_id' => $order_id, 'note' => $note, 'note_log_action' => 'updated note' ) );
+			// if($doc_link)
+			// $note .= '<br><a href="'.$doc_link.'" target="_blank">'.$doc_link.'</a>';
+			// wad_spp_update_working_order( array( 'order_id' => $order_id, 'note' => $note, 'note_log_action' => 'updated note' ) );
 		}
 		
 	}
@@ -547,8 +669,12 @@ $test_clients_array = array(4182,19, 2571, 3517);
 		$has_assigned_employees = count($assigned_employees_ids);
 		$has_Unassigned_Erynn = '';
 		$Erynn_ID = 68;
-		$has_Unassigned_Vinci = '';
-		$Vinci_ID = 3253;
+		// $has_Unassigned_Vinci = '';
+		// $Vinci_ID = 3253;
+		$has_Unassigned_Audrey = '';
+		$Audrey_ID = 3595;
+		$has_Unassigned_Claudia = '';
+		$Claudia_ID = 2783;
 		
 		$has_Customer_Service_tag_removed = '';
 		$has_Editor_Review_tag_removed = '';
@@ -604,9 +730,19 @@ $test_clients_array = array(4182,19, 2571, 3517);
 					$has_Unassigned_Erynn = 1;
 					continue;
 				}
-				if( $employee_id == $Vinci_ID ){
-					$has_Unassigned_Vinci = 1;
-					$unassigned_editors_ids_auto[] = $Vinci_ID;
+				// if( $employee_id == $Vinci_ID ){
+					// $has_Unassigned_Vinci = 1;
+					// $unassigned_editors_ids_auto[] = $Vinci_ID;
+					// continue;
+				// }
+				if( $employee_id == $Audrey_ID ){
+					$has_Unassigned_Audrey = 1;
+					$unassigned_editors_ids_auto[] = $Audrey_ID;
+					continue;
+				}
+				if( $employee_id == $Claudia_ID ){
+					$has_Unassigned_Claudia = 1;
+					$unassigned_editors_ids_auto[] = $Claudia_ID;
 					continue;
 				}
 				$post["employees[$i]"] = $employee_id;
@@ -625,8 +761,14 @@ $test_clients_array = array(4182,19, 2571, 3517);
 		if( $has_Unassigned_Erynn ){
 			wad_delete_query("order_assigned_user", "spp_id='{$Erynn_ID}' AND order_id='{$order_id}'");
 		}
-		if( $has_Unassigned_Vinci ){
-			wad_delete_query("order_assigned_user", "spp_id='{$Vinci_ID}' AND order_id='{$order_id}'");
+		// if( $has_Unassigned_Vinci ){
+			// wad_delete_query("order_assigned_user", "spp_id='{$Vinci_ID}' AND order_id='{$order_id}'");
+		// }
+		if( $has_Unassigned_Audrey ){
+			wad_delete_query("order_assigned_user", "spp_id='{$Audrey_ID}' AND order_id='{$order_id}'");
+		}
+		if( $has_Unassigned_Claudia ){
+			wad_delete_query("order_assigned_user", "spp_id='{$Claudia_ID}' AND order_id='{$order_id}'");
 		}
 		
 		if( wad_get_option('save_log') == 'yes')
@@ -663,11 +805,25 @@ $test_clients_array = array(4182,19, 2571, 3517);
 					array( "system", $Erynn_ID, "unassigned", "order", $order_id, $current_timestamp, "user", $Erynn_ID )
 				);
 			}
-			if( $has_Unassigned_Vinci )
+			// if( $has_Unassigned_Vinci )
+			// {
+				// wad_insert_query( "logs",
+					// array( "from_type", "from_id", "action", "source", "source_id", "time", "to_type", "to_id" ),
+					// array( "system", $Vinci_ID, "unassigned", "order", $order_id, $current_timestamp, "user", $Vinci_ID )
+				// );
+			// }
+			if( $has_Unassigned_Audrey )
 			{
 				wad_insert_query( "logs",
 					array( "from_type", "from_id", "action", "source", "source_id", "time", "to_type", "to_id" ),
-					array( "system", $Vinci_ID, "unassigned", "order", $order_id, $current_timestamp, "user", $Vinci_ID )
+					array( "system", $Audrey_ID, "unassigned", "order", $order_id, $current_timestamp, "user", $Audrey_ID )
+				);
+			}
+			if( $has_Unassigned_Claudia )
+			{
+				wad_insert_query( "logs",
+					array( "from_type", "from_id", "action", "source", "source_id", "time", "to_type", "to_id" ),
+					array( "system", $Claudia_ID, "unassigned", "order", $order_id, $current_timestamp, "user", $Claudia_ID )
 				);
 			}
 		}
@@ -704,9 +860,12 @@ $test_clients_array = array(4182,19, 2571, 3517);
 	}
 
 
-	//Add tag Customer Service, Editor Review as well as assign to Erynn and Vinci
+	//Add tag Customer Service as well as assign to Erynn and Vinci
 	if( $status == 9 ) //Revision
 	{
+		// file_put_contents('order.status.changed---'.$status.'.txt', json_encode($post));
+
+		
 		$tags = $post = array();
 		
 		$i=0;
@@ -718,16 +877,20 @@ $test_clients_array = array(4182,19, 2571, 3517);
 			}
 		}
 		$tags["tags[".$i."]"] = "Customer Service";
-		$tags["tags[".($i+1)."]"] = "Editor Review";
+		// $tags["tags[".($i+1)."]"] = "Editor Review";
 		
 		$Erynn_ID = 68;
-		$Vinci_ID = 3253; //Vinci(Editor)
-		$employees_id = array($Erynn_ID,$Vinci_ID);
-		// $employees_id = array('2783'); // claudia@wordagents.com
+		// $Vinci_ID = 3253; //Vinci(Editor)
+		$Audrey_ID = 3595; //Audrey(Editor)
+		$Claudia_ID = 2783; //Claudia(Editor)
+		// $employees_id = array($Erynn_ID,$Vinci_ID,$Audrey_ID,$Claudia_ID);
+		$employees_id = array($Erynn_ID,$Audrey_ID,$Claudia_ID);
 		
 		$employees_ids = array_merge($assigned_employees_ids, $employees_id);
 		
-		$assigned_editors_ids_auto[] = $Vinci_ID; 
+		// $assigned_editors_ids_auto[] = $Vinci_ID;
+		$assigned_editors_ids_auto[] = $Audrey_ID;
+		$assigned_editors_ids_auto[] = $Claudia_ID;
 
 		$i=0;
 		foreach($employees_ids as $employee_id)
@@ -749,7 +912,10 @@ $test_clients_array = array(4182,19, 2571, 3517);
 		}
 		
 		$post = array_merge($post, $tags);
+		
+		// file_put_contents('post---'.$status.'.txt', json_encode($post));
 
+		
 		wad_spp_update_order($order_id, $post);
 		
 		if( wad_get_option('save_log') == 'yes')
@@ -759,10 +925,10 @@ $test_clients_array = array(4182,19, 2571, 3517);
 				array( "system", "Added tag", "order", $order_id, $current_timestamp, "Customer Service")
 			);
 			
-			wad_insert_query( "logs",
-				array( "from_type", "action", "source", "source_id", "time", "data"),
-				array( "system", "Added tag", "order", $order_id, $current_timestamp, "Editor Review")
-			);
+			// wad_insert_query( "logs",
+				// array( "from_type", "action", "source", "source_id", "time", "data"),
+				// array( "system", "Added tag", "order", $order_id, $current_timestamp, "Editor Review")
+			// );
 		}
 		
 		$assigned_employees_ids = $employees_ids;
@@ -809,10 +975,11 @@ $test_clients_array = array(4182,19, 2571, 3517);
 	$atts['assigned_editors_ids_auto'] = $assigned_editors_ids_auto;
 	$atts['unassigned_editors_ids_auto'] = $unassigned_editors_ids_auto;
 
-	// file_put_contents('atts-before---'.$status.'---'.'.txt', json_encode($atts));
 	wad_set_users_order_total_count($atts);	
 	
 	// NEW END
+
+	// file_put_contents($order_id.'-staging-atts-before---'.$status.'---'.'.txt', json_encode($atts));
 	
 	// Set assigned orders for user
 	wad_delete_assigned_order_from_users($order_id);
@@ -831,5 +998,6 @@ $test_clients_array = array(4182,19, 2571, 3517);
 	){
 		wad_update_query("orders","date_due='{$spp_date_due}'", "order_id='{$order_id}'");
 	}
+	
 	
 // }

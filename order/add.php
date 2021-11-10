@@ -34,10 +34,9 @@ if( $client_company )
 $tags_add[] = $client_company;
 
 $order_articles_num	 	= $form_data['How many articles do you need?'];
-if( $order_articles_num > 1 ){
-	$order_title 			= $form_data['Title'];	
-}else{
-	$order_title 			= $form_data['Title or Topic'];	
+$order_title = isset($form_data['Title or Topic']) ? trim($form_data['Title or Topic']) : '';
+if( empty($order_title) ){
+	$order_title = isset($form_data['Title']) ? $form_data['Title'] : '';
 }
 
 if( $order_articles_num > 1 )
@@ -107,6 +106,7 @@ $test_clients_array = array(4182,19, 2571, 3517);
 		$post = array();
 		if( count($tags_add) )
 		{
+			$i=0;
 			foreach($tags_add as $tag){
 				$post["tags[".$i."]"] = $tag;
 				$i++;

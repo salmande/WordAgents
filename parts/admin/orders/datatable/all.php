@@ -16,7 +16,16 @@ if( $generalSearch )
 	if( $query_where )
 		$query_where .= ' AND ';
 		
-	$query_where .= "order_title LIKE '%{$generalSearch}%'";
+	$query_where .= "(order_title LIKE '%{$generalSearch}%' || order_id LIKE '%{$generalSearch}%')";
+}
+
+$missing_doc_link = (isset($_REQUEST['missing_doc_link']) && $_REQUEST['missing_doc_link']) ? true : false;
+if( $missing_doc_link )
+{	
+	if( $query_where )
+		$query_where .= ' AND ';
+		
+	$query_where .= "(doc_link IS NULL OR doc_link = '')";
 }
 
 $page = isset($_POST['pagination']['page']) ? $_POST['pagination']['page'] : 1;
@@ -41,10 +50,14 @@ foreach( $orders as &$order)
 	$order_words = ( $order['order_words'] ) ? $order['order_words'] : 0;
 	$order_title = $order['order_title'];
 	$order_status = $order['status'];
-	$order_doc_link = $order['doc_link'];
 	
 	$order['article_info'] = wad_get_order_info_html($order);
 	
+	if( !$order['doc_link'])
+		$order['doc_link'] = '';
+	else
+	$order['doc_link'] = sprintf('<a href="%s" target="_blank">Open Doc</a>', $order['doc_link']);
+
 	$order['date_due'] = ( $order['date_due'] ) ? date('F d, Y', $order['date_due']) : '-';
 	
 	$order['status'] = wad_get_status_label($order['status']);
@@ -64,13 +77,13 @@ foreach( $orders as &$order)
 			
 			if( $employee['role'] == 'Writer' )
 			{
-				$assigned_writers[] = $employee['name'];
+				$assigned_writers[] = sprintf('<a href="%s">%s</a>', BASE_URL.'/users/edit/'.$employee['spp_id'], $employee['name']);
 				$earning_writer += $order_words * $pay_rate;
 			}
 			
 			if( $employee['role'] == 'Editor' )
 			{
-				$assigned_editors[] = $employee['name'];
+				$assigned_editors[] = sprintf('<a href="%s">%s</a>', BASE_URL.'/users/edit/'.$employee['spp_id'], $employee['name']);
 				$earning_editor += $order_words * $pay_rate;
 			}
 			
