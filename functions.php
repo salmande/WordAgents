@@ -15,17 +15,45 @@ function wad_get_user_by_id($spp_id, $field = null){
 	$query = "SELECT * FROM users WHERE spp_id='".$spp_id."'";
 	$result = mysqli_query($con, $query);
 	$user = mysqli_fetch_assoc($result);
-	if( $field ){
+	if( $field && !empty($user) ){
 		return $user[$field];
 	}
 	return $user;
 }
 
-function wad_get_order($order_id, $field = null){
+function wad_get_user_by_email($email, $field = null){
 	global $con;
-	$result = wad_select_query("orders","*","order_id='{$order_id}'");
+	$query = "SELECT * FROM users WHERE email='".$email."'";
+	$result = mysqli_query($con, $query);
+	$user = mysqli_fetch_assoc($result);
+	if( $field && !empty($user) ){
+		return $user[$field];
+	}
+	return $user;
+}
+
+function wad_get_writer_or_editor_by_email($email, $field = null){
+	global $con;
+	$query = "SELECT * FROM users WHERE email='".$email."' AND (role='Writer' OR role='Editor')";
+	$result = mysqli_query($con, $query);
+	$user = mysqli_fetch_assoc($result);
+	if( $field && !empty($user) ){
+		return $user[$field];
+	}
+	return $user;
+}
+
+function wad_get_order($order_id, $field = null, $where=null){
+	global $con;
+	
+	if( $where==null)
+		$where = "order_id='{$order_id}'";
+	else
+		$where .= " AND order_id='{$order_id}'";
+	
+	$result = wad_select_query("orders","*",$where);
 	$order = mysqli_fetch_assoc($result);
-	if( $field ){
+	if( $field && !empty($order) ){
 		return $order[$field];
 	}
 	return $order;
@@ -54,22 +82,23 @@ function wad_get_current_user($field = null)
 		}
 	}
 	
-	if(empty($user_spp_id)){
+	if(empty($user_spp_id))
+	{
 		setCookie('wad_user_logged_in',false, strtotime( '+10 years' ));
 		header("Location: ".BASE_URL);
 	}
-	
-	if( $user_spp_id == '3268'){
-		// $user_spp_id = 3452;
-	}
-	
-	
-	$user = wad_get_user_by_id($user_spp_id);
-	
-	if( !$field )
-		return $user;
+	else
+	{
+		$user = wad_get_user_by_id($user_spp_id);
+		
+		if( empty($user) )
+			return;
+		
+		if( $field && isset($user[$field]) )
+			return $user[$field];
 
-	return $user[$field];
+		return $user;
+	}
 }
 
 function wad_get_spp_client_info($client_id){
@@ -117,6 +146,9 @@ function wad_spp_update_order($order_id, $post, $return = false){
 	curl_setopt($ch, CURLOPT_USERPWD, "$api_username:$api_password");
 	curl_setopt($ch, CURLOPT_POSTFIELDS, $post);
 	$updated_order = curl_exec($ch);
+	
+	// file_put_contents('udpated-order---'.$order_id.'.txt', $updated_order);
+	
 	if( $return ){
 		return json_decode($updated_order);
 	}
@@ -135,7 +167,6 @@ function wad_spp_delete_order($order_id){
 	curl_close($ch);
 }
 
-
 function wad_get_spp_order_messages($order_id){
 	
 	global $api_username, $api_password, $api_url;
@@ -149,6 +180,10 @@ function wad_get_spp_order_messages($order_id){
 	$order_messages = json_decode(curl_exec($ch));
 	curl_close($ch);
 	$order_messages = json_decode(json_encode($order_messages), true);
+	
+	if( isset($order_messages['status']) &&  $order_messages['status'] == 'error' )
+		return;
+	
 	return $order_messages;
 }
 
@@ -325,12 +360,26 @@ function wad_update_working_orders(){
 				wad_set_users_order_total_count($args); //uncomment
 				//NEW END
 				
+				$post2 = array(
+					'writer_name' => $assigned_writer_name,
+					'order_id' => $order_id,
+				);
+				// zap link: https://zapier.com/app/editor/130103282
+				$curl_url = "https://hooks.zapier.com/hooks/catch/8157470/busk1bg/";
+				$ch = curl_init();
+				curl_setopt($ch, CURLOPT_URL,$curl_url);
+				curl_setopt($ch, CURLOPT_RETURNTRANSFER,1);
+				curl_setopt($ch, CURLOPT_POST, 1);
+				curl_setopt($ch, CURLOPT_POSTFIELDS, $post2);
+				$r = curl_exec($ch);
+				
 				if( wad_get_option('send_emails') == 'yes' ) //uncomment
 				{
 					$email_sent = '';
 					
 					$subject = "Notice: Order reassigned";
-					$order_link = "https://app.wordagents.com/orders/".$order_id;
+					// $order_link = "https://app.wordagents.com/orders/".$order_id;
+					$order_link = BASE_URL."/orders?order={$order_id}&openpopup=true";
 					
 					$msg = "Hi {{writer_firstname}},<br />Your order <a href='{$order_link}'>{{order_title}} - {{order_number}}</a> has been in Working status for over {$hours_passed} hours without completion. This order will now be reassigned to another writer.<p>If you need help, contact <a href='mailto:talent@wordagents.com'>talent@wordagents.com</a>.</p>";
 					
@@ -346,7 +395,8 @@ function wad_update_working_orders(){
 					$data['message'] = $msg;
 					$data['to'] = $assigned_writer_email;
 					// $data['debug'] = 1;
-
+					
+					$email_sent = 0;
 					$send_email_response = wad_send_email($data);
 					// if( mail($writer['email'], $subject, $msg, $headers) )
 					if( $send_email_response == 'sent'){
@@ -384,8 +434,8 @@ function wad_update_working_orders(){
 					array( "system", "changed due date", "order", $order_id, time(), $spp_date_due)
 				);
 				wad_insert_query( "logs",
-					array( "from_type", "action", "source", "source_id", "time"),
-					array( "system", "deleted note", "order", $order_id, time())
+					array( "from_type", "action", "source", "source_id", "time", "data"),
+					array( "system", "deleted note", "order", $order_id, time(),"")
 				);
 			}
 		}
@@ -443,7 +493,8 @@ function wad_send_email_for_working_orders(){
 						$email_sent = '';
 						
 						$subject = "Action required: 6 hours left to complete order {$order_id}";
-						$order_link = "https://app.wordagents.com/orders/".$order_id;
+						// $order_link = "https://app.wordagents.com/orders/".$order_id;
+						$order_link = BASE_URL."/orders/working?order={$order_id}&openpopup=true";
 						
 						$msg = "Hi {{writer_firstname}},<br />Your order <u><a href='{$order_link}'>{{order_title}} - {{order_number}}</a></u> has been in Working status for over {$hours_passed} hours. Please aim to complete it within 6 hours. Otherwise, it will be reassigned to another writer.<p>If you need help, contact <a href='mailto:talent@wordagents.com'>talent@wordagents.com</a>.</p>";
 						
@@ -459,7 +510,8 @@ function wad_send_email_for_working_orders(){
 						$data['message'] = $msg;
 						$data['to'] = $assigned_writer_email;
 						// $data['debug'] = 1;
-					
+						
+						$email_sent = 0;
 						$send_email_response = wad_send_email($data);
 						// if( mail($writer['email'], $subject, $msg, $headers) )
 						if( $send_email_response == 'sent'){
@@ -489,12 +541,15 @@ function wad_update_query($table, $column, $where = null, $return = null){
 	
 	//$column = mysqli_real_escape_string($column,$con);
 	
+	if(is_null($column) || empty(trim($column)))
+		return;
+	
 	$query = "UPDATE {$table}";
 	$query .= " SET {$column}";
 	if( $where ){
 		$query .= " WHERE {$where}";
 	}
-	
+		
 	if( $return ){
 		if( $return == 'query')
 			return $query;
@@ -521,6 +576,8 @@ function wad_insert_query($table, $columns, $values){
 		$query .= implode(', ', $columns);
 	$query .= ")";
 	
+	
+	
 	$query .= " VALUES(";
 		$i=1;
 		$total = count($values);
@@ -534,12 +591,18 @@ function wad_insert_query($table, $columns, $values){
 			$i++;
 		}
 	$query .= ")";
-		
+	
+	
 	$result = mysqli_query($con, $query);
 	if( !$result ){
 		return die( mysqli_error($con)."\n<br>Query: $query\n<br>");
 	}
 	return $result;
+	// echo $query;
+	
+	echo '<pre>';
+	print_r($values);
+	exit;
 	
 }
 	
@@ -605,7 +668,7 @@ function wad_get_due_in($due_in_timestamp ){
 	$date2_timestamp = $date2->getTimestamp();
 	
 	if( $date1_timestamp < $date2_timestamp ){
-		return;
+		return "<strong class='text-danger'>Priority</strong>";
 	}
 	
 	// The diff-methods returns a new DateInterval-object...
@@ -736,10 +799,12 @@ function wad_order_details($order, $order_id = null){
 			<?php endif; ?>		
 			
 			<?php if( $order['status'] == 12 ): $assigned_writers = wad_get_assigned_writers($order_id); ?>
-				<div class="d-table-row">
-					<div class="d-table-cell">Writer name</div>
-					<div class="d-table-cell"><?php echo $assigned_writers[0]['name']; ?></div>
-				</div>
+				<?php if( !empty($assigned_writers) && isset($assigned_writers[0]) ): ?>
+					<div class="d-table-row">
+						<div class="d-table-cell">Writer name</div>
+						<div class="d-table-cell"><?php echo $assigned_writers[0]['name']; ?></div>
+					</div>
+				<?php endif; ?>
 			<?php endif; ?>	
 			
 		</div> <?php
@@ -748,7 +813,18 @@ function wad_order_details($order, $order_id = null){
 	
 	if( $order_id ){
 		
-		if( ( $order['status'] != 2 && $order['status'] != 17 ) ) // Submitted && ReadyToEdit
+		$order_status = $order['status'];
+		
+		if (
+			( is_writer() && $order_status != 2 )
+			|| ( is_editor() && $order_status != 17 )
+			|| ( is_admin() )
+		){
+			echo wad_get_order_messages($order);
+			echo wad_get_order_tags_dropdown($order);
+		}
+		
+		/* if( ( $order['status'] != 2 && $order['status'] != 17 ) ) // Submitted && ReadyToEdit
 		{
 			echo wad_get_order_messages($order);
 			
@@ -759,10 +835,10 @@ function wad_order_details($order, $order_id = null){
 			if( is_admin() || wad_test() ){
 				echo wad_get_order_messages($order);
 				echo wad_get_order_tags_dropdown($order);
-			}
-		}
+			} 
+		} */
 
-		if( is_admin() || wad_test() ){
+		if( is_admin() ){
 			echo wad_get_order_history($order);
 		}
 	}
@@ -1007,42 +1083,83 @@ function wad_get_order_history( $order){
 
 function wad_get_order_messages($order){
 	$order_id = isset($order['order_id']) ? $order['order_id'] : $order['id'];
+	$editor_submit_timestamp = $order['editor_submit_time'];
 	$messages = wad_get_spp_order_messages($order_id);
 	
 	ob_start();
 	?>
 	<h3 class="mt-5">Messages</h3>
 	
-	<?php if( count($messages) ): ?>
+	<?php if( !empty($messages) ): ?>
 	
 	<div class="card gutter-b overflow-auto max-h-225px">
 		<div class="card-body p-4">
+		
+			<?php 
+			
+			// echo is_admin(3653);exit;
+			
+			// echo '<pre>'; print_r($messages); exit; 
+			
+			?>
+		
 			<?php $i=1; foreach($messages as $msg): 
 				$team_msg = $msg['staff_only'];
+				$client_msg = $admin_msg = false;
+				
+				$date_added = $msg['date_added'];
+				
+				$date_added_timestamp = (int) strtotime($date_added);
 				
 				$name = wad_get_user_by_id($msg['user_id'], 'name');
 				$name_class = '';
+				$symbol_class = '';
+				
 				if( $team_msg )
 				{
 					$name .= ' added a note';
 					$name_class = 'text-primary ';
-				}
-				else if( is_editor($msg['user_id']) )
-				{
-					$name_class = 'text-dark-50 ';
+					$symbol_class = ' symbol-light-primary ';
+					
+					if( is_admin($msg['user_id']) ){
+						$admin_msg = true;
+						$name_class = 'text-orange ';
+						$symbol_class = ' symbol-light-orange ';
+					}
 				}
 				else
 				{
-					$client = wad_get_spp_client_info($msg['user_id']);
-					$name = ( isset($client['name_f']) ? ( $client['name_f'] . ( isset($client['name_l']) ? ' '.$client['name_l'] : '' ) ) : '' );
-					$name .= ' replied';
+					if( is_editor($msg['user_id']) ){
+						$name .= ' replied';
+						$name_class = 'text-dark-50 ';
+					}else{
+						$client = wad_get_spp_client_info($msg['user_id']);
+						$name = ( isset($client['name_f']) ? ( $client['name_f'] . ( isset($client['name_l']) ? ' '.$client['name_l'] : '' ) ) : '' );
+						// $name .= ' replied';
+						$client_msg = true;
+					}
 				}
-			?>
+								
+				//Do not display admin and client message for writer after client revision 
+				if( is_writer() ){
+					// $client_revisios = wad_query_with_fetch("SELECT * FROM order_client_revision WHERE order_id='{$order_id}' ORDER BY id DESC");
+					// if( isset($client_revisios[0]['time']) ){
+						// if( $client_revisios[0]['time'] < $date_added_timestamp )
+					if( $has_order_client_revision = wad_get_total_count("order_client_revision","order_id='{$order_id}'") ){
+						if( $date_added_timestamp > $editor_submit_timestamp ){
+							if( $admin_msg || $client_msg )
+							continue;
+						}
+					}
+				}
+				
+				?>
+				
 				<div class="d-flex">
-					<div class="symbol symbol-40 <?php if($team_msg){ echo " symbol-light-primary "; } ?> mr-5 mt-1">
+					<div class="symbol symbol-40 <?php if($team_msg){ echo $symbol_class; } ?> mr-5 mt-1">
 						<span class="symbol-label">
 							<?php /* <img src="/metronic/theme/html/demo7/dist/assets/media/svg/avatars/009-boy-4.svg" class="h-75 align-self-end" alt="" /> */ ?>
-							<?php echo $name[0]; ?>
+							<?php echo isset($name[0]) ? $name[0] : ''; ?>
 						</span>
 					</div>
 					<div class="d-flex flex-column flex-row-fluid">
@@ -1087,7 +1204,8 @@ function wad_get_order_messages($order){
 		</div>
 		
 		<?php //if( is_editor() && $order['status'] == 12 ): ?>
-		<?php if( $order['status'] == 5 || is_admin() ): ?>
+		<?php //if( $order['status'] == 5 || is_admin() ): ?>
+		<?php if( ! is_writer() || is_admin() ): ?>
 		<div class="card">
 			<div class="card-header" id="headingOne4">
 				<div class="card-title collapsed" data-toggle="collapse" data-target="#collapseOne4">
@@ -1172,13 +1290,15 @@ function wad_get_orders_assigned_user($select="*", $where=null){
 function wad_get_option($option_name){
 	$result = wad_select_query("options","value","name='{$option_name}'");
 	$results = mysqli_fetch_assoc($result);
-	return $results['value'];
+	return isset($results['value']) ? $results['value'] : '';
 }
 
 function wad_update_option($name, $value){
+	global $con;
 	$result = wad_select_query("options","id","name='{$name}'");
 	$is_option_exist = mysqli_num_rows($result);
 	if( $is_option_exist ){
+		$value = mysqli_real_escape_string($con, $value);
 		wad_update_query("options","value='{$value}'", "name='{$name}'");
 	}else{
 		wad_insert_query("options",array('name','value'),array($name, $value));
@@ -1248,13 +1368,12 @@ function wad_get_assigned_editors($order_id, $columns = '*'){
 	$records = mysqli_fetch_all($result, MYSQLI_ASSOC);
 	$editors = array();
 	$e = 0;
+
 	foreach($records as $rec){
 		$spp_id = $rec['spp_id'];
 		if( is_editor($spp_id) ){
-			$editor = wad_get_user_by_id($spp_id);
 			$editors[$e]['spp_id'] = $spp_id;
-			$editors[$e]['email'] = $editor['email'];
-			$editors[$e]['name'] = $editor['name'];
+			$editors[$e]['email'] = wad_get_user_by_id($spp_id, 'email');
 			$e++;
 		}
 	}
@@ -1265,15 +1384,17 @@ function wad_get_assigned_writers($order_id, $columns = '*'){
 	$result = wad_select_query("order_assigned_user",$columns,"order_id='{$order_id}'");
 	$records = mysqli_fetch_all($result, MYSQLI_ASSOC);
 	$writers = array();
-	$w = 0;
-	foreach($records as $rec){
-		$spp_id = $rec['spp_id'];
-		if( is_writer($spp_id) ){
-			$writer = wad_get_user_by_id($spp_id);
-			$writers[$w]['spp_id'] = $spp_id;
-			$writers[$w]['email'] = $writer['email'];
-			$writers[$w]['name'] = $writer['name'];
-			$w++;
+	if( !empty($records) ){
+		$w = 0;
+		foreach($records as $rec){
+			$spp_id = $rec['spp_id'];
+			if( is_writer($spp_id) ){
+				$writer = wad_get_user_by_id($spp_id);
+				$writers[$w]['spp_id'] = $spp_id;
+				$writers[$w]['email'] = $writer['email'];
+				$writers[$w]['name'] = $writer['name'];
+				$w++;
+			}
 		}
 	}
 	return $writers;
@@ -1335,24 +1456,52 @@ function wad_get_assigned_users_by_role($order_id, $role = 'Writer'){
 	return ${$role_var."_ids"};
 }
 
-function wad_get_assigned_writers_and_editors($order_id, $columns = '*'){
-	$result = wad_select_query("order_assigned_user",$columns,"order_id='{$order_id}'");
+function wad_get_assigned_writers_and_editors($order_id, $columns = array())
+{
+	$result = wad_select_query("order_assigned_user",'*',"order_id='{$order_id}'");
 	$records = mysqli_fetch_all($result, MYSQLI_ASSOC);
 	$writers = $editors = array();
 	$w = $e = 0;
-	foreach($records as $rec){
+	foreach($records as $rec)
+	{
 		$spp_id = $rec['spp_id'];
 		$user = wad_get_user_by_id($spp_id);
-		if( is_writer($spp_id) ){
-			$writers[$w]['spp_id'] = $spp_id;
-			$writers[$w]['email'] =  $user['email'];
-			$writers[$w]['name'] =  $user['name'];
+		if( is_writer($spp_id) )
+		{
+			if( empty($columns) ){
+				$writers[$w]['spp_id'] = $spp_id;
+				$writers[$w]['email'] =  $user['email'];
+				$writers[$w]['name'] =  $user['name'];
+			}else{
+				if( in_array('spp_id',$columns) )
+				$writers[$w]['spp_id'] = $spp_id;
+			
+				if( in_array('email',$columns) )
+				$writers[$w]['email'] =  $user['email'];
+
+				if( in_array('name',$columns) )
+				$writers[$w]['name'] =  $user['name'];
+			}
+		
 			$w++;
 		}
-		if( is_editor($spp_id) ){
-			$editors[$e]['spp_id'] = $spp_id;
-			$editors[$e]['email'] = $user['email'];
-			$editors[$e]['name'] = $user['name'];
+		if( is_editor($spp_id) )
+		{
+			if( empty($columns) ){
+				$editors[$e]['spp_id'] = $spp_id;
+				$editors[$e]['email'] = $user['email'];
+				$editors[$e]['name'] = $user['name'];
+			}
+			else{
+				if( in_array('spp_id',$columns) )
+				$editors[$e]['spp_id'] = $spp_id;
+
+				if( in_array('email',$columns) )
+				$editors[$e]['email'] = $user['email'];
+
+				if( in_array('name',$columns) )
+				$editors[$e]['name'] = $user['name'];
+			}
 			$e++;
 		}
 	}
@@ -1367,14 +1516,14 @@ function wad_has_assigned_user_to_order($order_id, $employee_id){
 function wad_reject_order_from_empolyee($order_id, $employee_id){
 	$result = wad_select_query("user_rejected_order","*","order_id='{$order_id}' AND spp_id='{$employee_id}' AND missed='0'");
 	if( ! mysqli_num_rows($result) ){
-		wad_insert_query("user_rejected_order", array("order_id", "spp_id", "missed"), array($order_id, $employee_id, "0") );
+		wad_insert_query("user_rejected_order", array("order_id", "spp_id", "missed","time"), array($order_id, $employee_id, "0",time()) );
 	}
 }
 
 function wad_missed_order_from_empolyee($order_id, $employee_id){
 	$result = wad_select_query("user_rejected_order","*","order_id='{$order_id}' AND spp_id='{$employee_id}' AND missed='1'");
 	if( ! mysqli_num_rows($result) ){
-		wad_insert_query("user_rejected_order", array("order_id", "spp_id", "missed"), array($order_id, $employee_id, "1") );
+		wad_insert_query("user_rejected_order", array("order_id", "spp_id", "missed","time"), array($order_id, $employee_id, "1",time()) );
 	}
 }
 
@@ -1411,70 +1560,78 @@ function wad_pagination($currentPage, $itemCount, $itemsPerPage, $adjacentCount=
 	$orders_per_page_dropdown = ( wad_get_option('orders_per_page_dropdown') ) ? wad_get_option('orders_per_page_dropdown') : '	2,5,10,25,50,100';
 	$orders_per_page_dropdown_array = explode(',',$orders_per_page_dropdown);
 
-    $firstPage = 1;
-    $lastPage  = ceil($itemCount / $itemsPerPage);
+	$is_all = is_numeric($itemsPerPage) ? false : true;
+
+	if( !$is_all ){
+		$firstPage = 1;
+		$lastPage  = ceil($itemCount / $itemsPerPage);
+	}
 	
 	$output = '<div class="wad-pagination border-top pt-4 mb-n4">';
 		$output .= '<div class="d-flex justify-content-between align-items-center flex-wrap">';
 			$output .= '<div class="d-flex flex-wrap py-2 mr-3">';
-			
-				if ($lastPage != 1) {
+				if( !$is_all){
+					if ($lastPage != 1) {
 
-					if ($currentPage <= $adjacentCount + $adjacentCount) {
-						$firstAdjacentPage = $firstPage;
-						$lastAdjacentPage  = min($firstPage + $adjacentCount + $adjacentCount, $lastPage);
-					} elseif ($currentPage > $lastPage - $adjacentCount - $adjacentCount) {
-						$lastAdjacentPage  = $lastPage;
-						$firstAdjacentPage = $lastPage - $adjacentCount - $adjacentCount;
-					} else {
-						$firstAdjacentPage = $currentPage - $adjacentCount;
-						$lastAdjacentPage  = $currentPage + $adjacentCount;
-					}
-							
-					if ($showPrevNext) {
-						if ($currentPage == $firstPage) {
-							$output .= '<a href="javascript:;" class="page btn btn-icon btn-xs btn-light mr-2 my-1 cursor-default disabled"><i class="ki ki-bold-arrow-back icon-xs"></i></a>';
+						if ($currentPage <= $adjacentCount + $adjacentCount) {
+							$firstAdjacentPage = $firstPage;
+							$lastAdjacentPage  = min($firstPage + $adjacentCount + $adjacentCount, $lastPage);
+						} elseif ($currentPage > $lastPage - $adjacentCount - $adjacentCount) {
+							$lastAdjacentPage  = $lastPage;
+							$firstAdjacentPage = $lastPage - $adjacentCount - $adjacentCount;
 						} else {
-							$output .= '<a data-page="'.($currentPage-1).'" data-per_page="'.$itemsPerPage.'" class="page btn btn-icon btn-xs btn-light mr-2 my-1"><i class="ki ki-bold-arrow-back icon-xs"></i></a>';
+							$firstAdjacentPage = $currentPage - $adjacentCount;
+							$lastAdjacentPage  = $currentPage + $adjacentCount;
 						}
+								
+						if ($showPrevNext) {
+							if ($currentPage == $firstPage) {
+								$output .= '<a href="javascript:;" class="page btn btn-icon btn-xs btn-light mr-2 my-1 cursor-default disabled"><i class="ki ki-bold-arrow-back icon-xs"></i></a>';
+							} else {
+								$output .= '<a data-page="'.($currentPage-1).'" data-per_page="'.$itemsPerPage.'" class="page btn btn-icon btn-xs btn-light mr-2 my-1"><i class="ki ki-bold-arrow-back icon-xs"></i></a>';
+							}
+						}
+						if ($firstAdjacentPage > $firstPage) {
+							$output .= '<a data-page="'.($firstPage).'" data-per_page="'.$itemsPerPage.'" class="page btn btn-icon btn-xs border-0 mr-2 my-1 btn-light">' . $firstPage . '</a>';
+							if ($firstAdjacentPage > $firstPage + 1) {
+								$output .= '<a href="javascript:;" class="page btn btn-icon btn-xs border-0 btn-light mr-2 my-1 cursor-default disabled">...</a>';
+							}
+						}
+						for ($i = $firstAdjacentPage; $i <= $lastAdjacentPage; $i++) {
+							if ($currentPage == $i) {
+								$output .= '<span class="btn btn-icon btn-xs border-0 mr-2 my-1 btn-primary cursor-default disabled">' . $i . '</span>';
+							} else {
+								$output .= '<a data-page="'.($i).'" data-per_page="'.$itemsPerPage.'" class="page btn btn-icon btn-xs border-0 mr-2 my-1 btn-light">' . $i . '</a>';
+							}
+						}
+						if ($lastAdjacentPage < $lastPage) {
+							if ($lastAdjacentPage < $lastPage - 1) {
+								$output .= '<a href="javascript:;" class="page btn btn-icon btn-xs border-0 btn-light mr-2 my-1 cursor-default disabled">...</a>';
+							}
+							$output .= '<a data-page="'.($lastPage).'" data-per_page="'.$itemsPerPage.'" class="page btn btn-icon btn-xs border-0 mr-2 my-1 btn-light">' . $lastPage . '</a>';
+						}
+						if ($showPrevNext) {
+							if ($currentPage == $lastPage) {
+								$output .= '<a href="javascript:;" class="page btn btn-icon btn-xs btn-light mr-2 my-1 disabled"><i class="ki ki-bold-arrow-next icon-xs"></i></a>';
+							} else {
+								$output .= '<a data-page="'.($currentPage+1).'" data-per_page="'.$itemsPerPage.'" class="page btn btn-icon btn-xs btn-light mr-2 my-1"><i class="ki ki-bold-arrow-next icon-xs"></i></a>';
+							}
+						}	
 					}
-					if ($firstAdjacentPage > $firstPage) {
-						$output .= '<a data-page="'.($firstPage).'" data-per_page="'.$itemsPerPage.'" class="page btn btn-icon btn-xs border-0 mr-2 my-1 btn-light">' . $firstPage . '</a>';
-						if ($firstAdjacentPage > $firstPage + 1) {
-							$output .= '<a href="javascript:;" class="page btn btn-icon btn-xs border-0 btn-light mr-2 my-1 cursor-default disabled">...</a>';
-						}
-					}
-					for ($i = $firstAdjacentPage; $i <= $lastAdjacentPage; $i++) {
-						if ($currentPage == $i) {
-							$output .= '<span class="btn btn-icon btn-xs border-0 mr-2 my-1 btn-primary cursor-default disabled">' . $i . '</span>';
-						} else {
-							$output .= '<a data-page="'.($i).'" data-per_page="'.$itemsPerPage.'" class="page btn btn-icon btn-xs border-0 mr-2 my-1 btn-light">' . $i . '</a>';
-						}
-					}
-					if ($lastAdjacentPage < $lastPage) {
-						if ($lastAdjacentPage < $lastPage - 1) {
-							$output .= '<a href="javascript:;" class="page btn btn-icon btn-xs border-0 btn-light mr-2 my-1 cursor-default disabled">...</a>';
-						}
-						$output .= '<a data-page="'.($lastPage).'" data-per_page="'.$itemsPerPage.'" class="page btn btn-icon btn-xs border-0 mr-2 my-1 btn-light">' . $lastPage . '</a>';
-					}
-					if ($showPrevNext) {
-						if ($currentPage == $lastPage) {
-							$output .= '<a href="javascript:;" class="page btn btn-icon btn-xs btn-light mr-2 my-1 disabled"><i class="ki ki-bold-arrow-next icon-xs"></i></a>';
-						} else {
-							$output .= '<a data-page="'.($currentPage+1).'" data-per_page="'.$itemsPerPage.'" class="page btn btn-icon btn-xs btn-light mr-2 my-1"><i class="ki ki-bold-arrow-next icon-xs"></i></a>';
-						}
-					}	
 				}
-			
+				
+			$output .= '</div>';
+
 			ob_start();
 			
 			?>
-			
-			</div>
 			<div class="d-flex align-items-center py-3">
 				<div class="d-flex align-items-center loader-pagination hide">
 					<div class="mr-2 text-muted">Loading...</div>
-					<div class="spinner mr-10"></div>
+					<div class="spinner spinner-loader mr-10"></div>
+				</div>
+				<div class="blockElement loading middle hide">
+					<div class="blockui"><span>Please wait...</span><span class="spinner spinner-loader spinner-primary "></span></div>
 				</div>
 				<form class="pagination-form">
 					<select class="form-control form-control-xs font-weight-bold mr-4 border-0 bg-light select-per-page" style="width: 75px;" name="per_page">
@@ -1485,18 +1642,30 @@ function wad_pagination($currentPage, $itemCount, $itemsPerPage, $adjacentCount=
 					<input type="hidden" name="page" value="1" />
 					<input type="hidden" name="action" value=""/>
 				</form>
+
+				<?php 
 				
-				<?php
-					$total = $itemCount;
-					$end = $currentPage*$itemsPerPage;
-					$start = $end-$itemsPerPage+1;
+				$total = $itemCount;
+
+				
+				if( $is_all ): ?>
+				
+					<span class="text-muted"><?php echo "Displaying 1 of $total records"; ?></span> <?php
+				
+				else: 
+				
+						$end = $currentPage*$itemsPerPage;
+						$start = $end-$itemsPerPage+1;
+						
+						if( $itemsPerPage > $total || $start == $total || $currentPage == $lastPage ){
+							$end = $total;
+						}
+					?>
 					
-					if( $itemsPerPage > $total || $start == $total || $currentPage == $lastPage ){
-						$end = $total;
-					}
-				?>
+					<span class="text-muted"><?php echo "Displaying $start - $end of $total records"; ?></span>
 				
-				<span class="text-muted"><?php echo "Displaying $start - $end of $total records"; ?></span>
+				<?php endif; ?>
+				
 			</div> 
 		</div>
 	</div>
@@ -1542,6 +1711,19 @@ function is_admin($user_id = null){
 	}
 		
 	if( $user_role == 'Admin' ){
+		return true;
+	}
+	return false;
+}
+
+function is_assigner($user_id = null){
+	if( $user_id ){
+		$user_role = wad_get_user_by_id($user_id, 'role');
+	}else{
+		$user_role = wad_get_current_user('role');
+	}
+		
+	if( $user_role == 'Assigner' ){
 		return true;
 	}
 	return false;
@@ -1646,7 +1828,7 @@ function wad_get_team(){
 function wad_get_team_member_by_email($email = null){
 	$result = wad_select_query("spp_team","*","email='{$email}'");
 	$team = mysqli_fetch_all($result, MYSQLI_ASSOC);
-	return $team[0];
+	return isset($team[0]) ? $team[0] : array();
 }
 
 function wad_get_order_info_html($order){
@@ -1665,8 +1847,14 @@ function wad_get_order_info_html($order){
 	
 }
 
-function wad_get_rejected_orders_by_id($employee_id, $total_records = false){
-	$result = wad_select_query("user_rejected_order","*","spp_id='{$employee_id}' AND missed='0'");
+function wad_get_rejected_orders_by_id($employee_id, $total_records = false, $where=null){
+	
+	if( $where==null)
+		$where = "spp_id='{$employee_id}' AND missed='0'";
+	else
+		$where .= " AND spp_id='{$employee_id}' AND missed='0'";
+	
+	$result = wad_select_query("user_rejected_order","*",$where);
 	if( $total_records ){
 		return mysqli_num_rows($result);
 	}
@@ -1762,7 +1950,7 @@ function wad_send_new_created_orders_email()
 			$data['message'] = $msg;
 			$data['to'] = $writer['email'];
 			// $data['debug'] = 1;
-			
+			$email_sent = 0;
 			$send_email_response = wad_send_email($data);
 			// if( mail($writer['email'], $subject, $msg, $headers) )
 			if( $send_email_response == 'sent'){
@@ -1843,7 +2031,7 @@ function wad_send_new_submitted_orders_email()
 			$data['message'] = $msg;
 			$data['to'] = $editor['email'];
 			// $data['debug'] = 1;
-			
+			$email_sent = 0;
 			$send_email_response = wad_send_email($data);
 			// if( mail($editor['email'], $subject, $msg, $headers) )
 			if( $send_email_response == 'sent'){
@@ -1893,7 +2081,9 @@ function wad_save_email_log($from, $to, $subject, $msg, $order_id){
 	);
 }
 
-function wad_body_classes(){
+function wad_body_classes()
+{
+	global $globals_admin;
 	
 	$class = array();
 
@@ -1909,6 +2099,13 @@ function wad_body_classes(){
         $class[] = 'not-logged-in';	
 	}
 	
+	if(
+		( is_writer() && in_array('writer',$globals_admin['topbar_visibility']) )
+		|| ( is_editor() && in_array('editor',$globals_admin['topbar_visibility']) )
+	){
+		$class[] = 'visible-topbar-custom';
+	}
+	
 	return implode(' ', $class);
 }
 
@@ -1919,13 +2116,15 @@ function wad_test(){
 function wad_get_current_url($domain_exclude = null){
 	global $wad_url;
 	
-	$baseurl = str_replace('wad-orders','orders',$wad_url);
-	$baseurl = str_replace('wad-admin','admin',$baseurl);
-	
+	$url = str_replace('wad-orders','orders',$wad_url);
+	$url = str_replace('wad-stats','stats',$url);
+	$url = str_replace('wad-users','users',$url);
+	$url = str_replace('wad-settings','settings',$url);
+		
 	if( $domain_exclude )
-		return $baseurl;
+		return $url;
 	
-	return BASE_URL.'/'.$baseurl;
+	return BASE_URL.'/'.$url;
 }
 
 function wad_get_timestamp_of_monday_first_day_of_the_week(){
@@ -1974,8 +2173,9 @@ function wad_writer_claim_order()
 	$order_id = isset($_REQUEST['order_id']) ? $_REQUEST['order_id'] : '';
 	$employee_id = isset($_REQUEST['employee_id']) ? $_REQUEST['employee_id'] : '';
 	$ajax = isset($_REQUEST['ajax']) ? $_REQUEST['ajax'] : '';
+	$action = isset($_REQUEST['action']) ? $_REQUEST['action'] : '';
 	$status = 5; // Working
-
+	
 	if( !$order_id )
 		die();
 	
@@ -1993,7 +2193,7 @@ function wad_writer_claim_order()
 	}
 	
 	// 
-	if( $_SESSION['new_orders_count'] ){
+	if( isset($_SESSION['new_orders_count']) ){
 		$_SESSION['new_orders_count'] = $_SESSION['new_orders_count'] - 1;
 	}
 	
@@ -2003,6 +2203,10 @@ function wad_writer_claim_order()
 	$rejected_order_ids = $employee['rejected_order_ids'];
 	
 	$order_info = wad_get_spp_order_info($order_id);
+	$spp_order_status = isset($order_info['status']) ? $order_info['status'] : '';
+	if( $spp_order_status=='error' || empty($order_info) )
+		return;
+	
 	$order_title = $order_info['service'];
 	$order_words = (int) (str_replace(array(',','Words'),'',$order_info['options']['How many words?']));
 	
@@ -2018,9 +2222,6 @@ function wad_writer_claim_order()
 		'writer_name' => $employee_name,
 		'date_due_timestamp' => $date_due_timestamp
 	));
-	
-	$doc_link = $order["doc_link"];
-	$note .= '<br><a href="'.$doc_link.'" target="_blank">'.$doc_link.'</a>';
 	
 	$post = array(
 		"status" 		=> $status,
@@ -2096,17 +2297,34 @@ function wad_writer_claim_order()
 		);
 		
 		wad_insert_query( "logs",
-			array( "from_type", "from_id", "action", "source", "source_id", "time"),
-			array( "system", $employee_id, "added note", "order", $order_id, time())
+			array( "from_type", "from_id", "action", "source", "source_id", "time","data"),
+			array( "system", $employee_id, "added note", "order", $order_id, time(),$note)
 		);
 	}
 	
 	if( wad_get_option('send_emails') == 'yes' )
 	{
-		$subject = "Claimed: Order {$order_id}";
-		$order_link = "https://app.wordagents.com/orders/".$order_id;
+		//$order_link = "https://app.wordagents.com/orders/".$order_id;
+		$order_link = BASE_URL."/orders/working?order={$order_id}&openpopup=true";
 		
-		$msg = "Hi {{writer_firstname}},<br>You've successfully claimed order <a href='{$order_link}'>{{order_title}} - {{order_number}}</a>. This order is due by {{writer_due_date_time}}.<p>If you need help, contact <a href='mailto:talent@wordagents.com'>talent@wordagents.com</a>.</p>";
+		$order_claimed_or_assigned = "Writer claimed";
+		
+		if( $action=='admin_assign_writer_new_order' ){
+			
+			$subject = "Assigned: Order {$order_id}";
+
+			global $current_user; 
+			
+			$current_user_first_name = $current_user['first_name'];
+			
+			$msg = "Hi {{writer_firstname}},<br>";
+			$msg .= $current_user_first_name . " have successfully assigned you order <a href='{$order_link}'>{{order_title}} - {{order_number}}</a>. This order is due by {{writer_due_date_time}}.<p>If you need help, contact <a href='mailto:talent@wordagents.com'>talent@wordagents.com</a>.</p>";		
+		}else{
+			$subject = "Claimed: Order {$order_id}";
+			$msg = "Hi {{writer_firstname}},<br>You've successfully claimed order <a href='{$order_link}'>{{order_title}} - {{order_number}}</a>. This order is due by {{writer_due_date_time}}.<p>If you need help, contact <a href='mailto:talent@wordagents.com'>talent@wordagents.com</a>.</p>";
+		}
+		
+		
 		
 		$writer_firstname = wad_get_name_part('first',$employee_name);
 		$writer_due_by = wad_date($date_due_timestamp, 'h:m A F j, Y') . ' EST';
@@ -2122,26 +2340,33 @@ function wad_writer_claim_order()
 		$data['message'] = $msg;
 		$data['to'] = $employee_email;
 		// $data['debug'] = 1;
-		
+		$email_sent = 0;
 		$send_email_response = wad_send_email($data);
 		// if( mail($employee_email, $subject, $msg, $headers)){
 		if( $send_email_response == 'sent'){
 			wad_create_update_email_counter();
 			$from = "WordAgents Dashboard";
-			$to = "Writer claimed";
+			$to = $order_claimed_or_assigned;
 			wad_save_email_log($from, $to, $subject, $msg, $order_id);
 		}
-	} 
+	}
 	
-	if(  $ajax ){
-		if( $response->status == 'Working' ){
+	if( $ajax ){
+		if( isset($response->status) && $response->status == 'Working' ){
+
+			if( $action=='writer_claim_order' )
 			$result = array('result'=>'claimed','msg'=>'');
+			
+			if( $action=='admin_assign_writer_new_order' )
+			$result = array('result'=>'writer_assigned','msg'=>'Writer assigned successfully');
+			
 			echo json_encode($result);
 			die();
 		}
 	}else{	
 		header("Location: ".BASE_URL."/orders/working");
 	}
+	
 }
 // END - writer claim order
 
@@ -2149,8 +2374,13 @@ function wad_writer_claim_order()
 function wad_editor_claim_order()
 {
 	$order_id = isset($_REQUEST['order_id']) ? $_REQUEST['order_id'] : '';
+
+	if( !$order_id )
+		return;
+
 	$employee_id = isset($_REQUEST['employee_id']) ? $_REQUEST['employee_id'] : '';
 	$ajax = isset($_REQUEST['ajax']) ? $_REQUEST['ajax'] : '';
+	$action = isset($_REQUEST['action']) ? $_REQUEST['action'] : '';
 	$status = 12; // Editing
 	$current_timestamp = time();
 	$order = wad_get_order($order_id);
@@ -2160,13 +2390,13 @@ function wad_editor_claim_order()
 	$employee_email = $employee['email'];
 	$assigned_writers = wad_get_assigned_writers($order_id);
 
-	if( !$order_id )
-		die();
-	
-	
 	// Check claimed already
 	if( count(wad_get_assigned_editors($order_id)) ){
-		$msg = 'This article has been claimed by another editor. Please reload the page to see the latest orders.';
+		$msg = 'This article has been claimed by another editor.';
+	
+		if( $action == 'editor_claim_order' )
+		$msg .= ' Please reload the page to see the latest orders.';
+		
 		$result = array('result'=>'already_claimed','msg'=>$msg);
 		if( $ajax ){
 			echo json_encode($result);
@@ -2191,7 +2421,7 @@ function wad_editor_claim_order()
 		die();
 	}
 	
-	if( $_SESSION['new_orders_count'] ){
+	if( isset($_SESSION['new_orders_count']) ){
 		$_SESSION['new_orders_count'] = $_SESSION['new_orders_count'] - 1;
 	}	
 	
@@ -2200,6 +2430,9 @@ function wad_editor_claim_order()
 	);
 	
 	$order_info = wad_get_spp_order_info($order_id);
+	$spp_order_status = isset($order_info['status']) ? $order_info['status'] : '';
+	if( $spp_order_status=='error' || empty($order_info) )
+		return;
 
 	$i=0;
 	foreach($order_info['employees'] as $employee){
@@ -2248,13 +2481,29 @@ function wad_editor_claim_order()
 	
 	if( wad_get_option('send_emails') == 'yes' )
 	{
-		$subject = "Claimed: Order {$order_id}";
-		
+				
 		$editor_firstname = wad_get_name_part('first',$employee_name);
 		$editor_due_by = wad_date($editor_claim_time_end, 'h:m A F j, Y') . ' EST';
-		$order_link = "https://app.wordagents.com/orders/".$order_id;
+		//$order_link = "https://app.wordagents.com/orders/".$order_id;
+		$order_link = BASE_URL."/orders/editing?order={$order_id}&openpopup=true";
+		
+		$order_claimed_or_assigned = "Editor claimed";
+	
+		if( $action=='admin_assign_editor_readyToEdit_order' ){
+			
+			$subject = "Assigned: Order {$order_id}";
 
-		$msg = "Hi {{editor_firstname}},<br />You've successfully claimed order <a href='{$order_link}'>{{order_title}} - {{order_number}}</a>.<p>This order is due by {{editor_due_date_time}}.</p><p>If you need help, contact Chris on Slack or at <a href='mailto:chris@wordagents.com'>chris@wordagents.com</a>.</p>";
+			global $current_user; 
+			
+			$current_user_first_name = $current_user['first_name'];
+			
+			$msg = "Hi {{editor_firstname}},<br>";
+			$msg .= $current_user_first_name . " have successfully assigned you order <a href='{$order_link}'>{{order_title}} - {{order_number}}</a>. This order is due by {{editor_due_date_time}}.<p>If you need help, contact Chris on Slack or at <a href='mailto:chris@wordagents.com'>chris@wordagents.com</a>.</p>";	
+		}else{
+			$subject = "Claimed: Order {$order_id}";
+
+			$msg = "Hi {{editor_firstname}},<br />You've successfully claimed order <a href='{$order_link}'>{{order_title}} - {{order_number}}</a>.<p>This order is due by {{editor_due_date_time}}.</p><p>If you need help, contact Chris on Slack or at <a href='mailto:chris@wordagents.com'>chris@wordagents.com</a>.</p>";
+		}
 		
 		$msg = str_replace(
 			array("{{editor_firstname}}", "{{order_title}}", "{{order_number}}", "{{editor_due_date_time}}"),
@@ -2262,29 +2511,28 @@ function wad_editor_claim_order()
 			$msg
 		);
 
-
 		// NEW EMAIL SMTP
 		$data['subject'] = $subject;
 		$data['message'] = $msg;
 		$data['to'] = $employee_email;
 		// $data['debug'] = 1;
-		
+		$email_sent = 0;
 		$send_email_response = wad_send_email($data);
 		// if( mail($employee_email, $subject, $msg, $headers) ){
 		if( $send_email_response == 'sent'){
 			wad_create_update_email_counter();
 			$from = "WordAgents Dashboard";
-			$to = "Editor claimed";
+			$to = $order_claimed_or_assigned;
 			wad_save_email_log($from, $to, $subject, $msg, $order_id);
 		} 
-		
+			
 		foreach($assigned_writers as $writer){
 
 			$subject = "Ready to edit: Order {$order_id}";
 			
 			$writer_firstname = wad_get_name_part('first',$writer['name']);
 			$link_to_OG_new_orders = BASE_URL.'/orders';
-			$order_link = "https://app.wordagents.com/orders/".$order_id;
+			$order_link = BASE_URL."/orders/editing?order={$order_id}&openpopup=true";
 			
 			$msg = "Hi {{writer_firstname}},<br />Your order <a href='{$order_link}'>{{order_title}} - {{order_number}}</a> has moved to Editing. You'll receive a follow up email if your editor has any notes for revision.<p>To claim new orders, go to the <a href='{{link_to_OG_new_orders}}'>self-service dashboard</a>.</p><p>If you need help, contact <a href='mailto:talent@wordagents.com'>talent@wordagents.com</a>.</p>";
 				
@@ -2299,7 +2547,7 @@ function wad_editor_claim_order()
 			$data['message'] = $msg;
 			$data['to'] = $writer['email'];
 			// $data['debug'] = 1;
-			
+			$email_sent = 0;
 			$send_email_response = wad_send_email($data);
 			// if( mail($employee_email, $subject, $msg, $headers) ){
 			if( $send_email_response == 'sent'){
@@ -2312,8 +2560,14 @@ function wad_editor_claim_order()
 	}
 	
 	if(  $ajax ){
-		if( $response->status == 'Editing' ){
+		if( $response->status == 'Editing' )
+		{
+			if( $action=='editor_claim_order' )
 			$result = array('result'=>'claimed','msg'=>'');
+			
+			if( $action=='admin_assign_editor_readyToEdit_order' )
+			$result = array('result'=>'editor_assigned','msg'=>'Editor assigned and changed status to Editing');
+			
 			echo json_encode($result);
 			die();
 		}
@@ -2630,18 +2884,15 @@ function wad_get_orders_ids($columns = "order_id"){
 
 function wad_get_new_orders_due_timestamp($order_words)
 {
-	$current_timestamp = time();
-	$date_due_timestamp = strtotime('+48 hours', $current_timestamp);
-	if( $order_words >= 5000 ){
-		$date_due_timestamp = strtotime('+72 hours', $current_timestamp);
-	}
-	
-	return $date_due_timestamp;
+	$current_time = time();
+	return wad_get_order_due_date($order_words, $current_time);
+
 }
 
 function wad_get_due_timestamp($t = '+24 hours')
 {
-	return strtotime($t, time());
+	$current_time = time();
+	return strtotime($t, $current_time);
 }
 
 function wad_get_total_count($query_from,$query_where = null, $query_echo = null){
@@ -3010,7 +3261,7 @@ function wad_set_users_order_total_count($data = array())
 			$subtract_to_Writer_fields = array('new_orders_count');
 			if( !empty($assigned_writers_ids) ){
 				foreach($assigned_writers_ids as $writer_id){
-					${"add_fields_".$add_counter} = array('all_orders_count','revision_orders_count');
+					${"add_fields_".$add_counter} = array('all_orders_count','editor_revision_orders_count');
 					${"add_user_spp_id_" . $add_counter} = $writer_id;
 					$add_counter++;
 					${"add_words_".$add_words_counter} = $order_words;
@@ -3020,7 +3271,7 @@ function wad_set_users_order_total_count($data = array())
 			}
 			if( !empty($assigned_editors_ids) ){
 				foreach($assigned_editors_ids as $editor_id){
-					${"add_fields_".$add_counter} = array('all_orders_count','revision_orders_count');
+					${"add_fields_".$add_counter} = array('all_orders_count','editor_revision_orders_count');
 					${"add_user_spp_id_" . $add_counter} = $editor_id;
 					$add_counter++;
 					${"add_words_".$add_words_counter} = $order_words;
@@ -3059,7 +3310,7 @@ function wad_set_users_order_total_count($data = array())
 			$add_to_Writer_fields = array('new_orders_count');
 			if( !empty($assigned_writers_ids_old) ){
 				foreach($assigned_writers_ids_old as $writer_id){
-					${"subtract_fields_".$subtract_counter} = array('all_orders_count', 'revision_orders_count');
+					${"subtract_fields_".$subtract_counter} = array('all_orders_count', 'editor_revision_orders_count');
 					${"subtract_user_spp_id_" . $subtract_counter} = $writer_id;
 					$subtract_counter++;
 					${"subtract_words_".$subtract_words_counter} = $order_words;
@@ -3069,7 +3320,7 @@ function wad_set_users_order_total_count($data = array())
 			}
 			if( !empty($assigned_editors_ids_old) ){
 				foreach($assigned_editors_ids_old as $editor_id){
-					${"subtract_fields_".$subtract_counter} = array('all_orders_count', 'revision_orders_count');
+					${"subtract_fields_".$subtract_counter} = array('all_orders_count', 'editor_revision_orders_count');
 					${"subtract_user_spp_id_" . $subtract_counter} = $editor_id;
 					$subtract_counter++;
 					${"subtract_words_".$subtract_words_counter} = $order_words;
@@ -3081,7 +3332,7 @@ function wad_set_users_order_total_count($data = array())
 		else if( $editing_To_EditorRevision ){
 			if( !empty($assigned_writers_ids) ){
 				foreach($assigned_writers_ids as $writer_id){
-					${"add_fields_".$add_counter} = array('revision_orders_count');
+					${"add_fields_".$add_counter} = array('editor_revision_orders_count');
 					${"add_user_spp_id_" . $add_counter} = $writer_id;
 					$add_counter++;
 					${"subtract_fields_".$subtract_counter} = array('editing_orders_count');
@@ -3091,7 +3342,7 @@ function wad_set_users_order_total_count($data = array())
 			}
 			if( !empty($assigned_editors_ids) ){
 				foreach($assigned_editors_ids as $editor_id){
-					${"add_fields_".$add_counter} = array('revision_orders_count');
+					${"add_fields_".$add_counter} = array('editor_revision_orders_count');
 					${"add_user_spp_id_" . $add_counter} = $editor_id;
 					$add_counter++;
 					${"subtract_fields_".$subtract_counter} = array('editing_orders_count');
@@ -3106,7 +3357,7 @@ function wad_set_users_order_total_count($data = array())
 					${"add_fields_".$add_counter} = array('editing_orders_count');
 					${"add_user_spp_id_" . $add_counter} = $writer_id;
 					$add_counter++;
-					${"subtract_fields_".$subtract_counter} = array('revision_orders_count');
+					${"subtract_fields_".$subtract_counter} = array('editor_revision_orders_count');
 					${"subtract_user_spp_id_" . $subtract_counter} = $writer_id;
 					$subtract_counter++;
 				}
@@ -3116,13 +3367,45 @@ function wad_set_users_order_total_count($data = array())
 					${"add_fields_".$add_counter} = array('editing_orders_count');
 					${"add_user_spp_id_" . $add_counter} = $editor_id;
 					$add_counter++;
-					${"subtract_fields_".$subtract_counter} = array('revision_orders_count');
+					${"subtract_fields_".$subtract_counter} = array('editor_revision_orders_count');
 					${"subtract_user_spp_id_" . $subtract_counter} = $editor_id;
 					$subtract_counter++;
 				}
 			}
 		}
-		else if( $editorRevision_To_Complete || $revision_To_Complete ){
+		else if( $editorRevision_To_Complete ){
+			if( !empty($assigned_writers_ids) ){
+				foreach($assigned_writers_ids as $writer_id){
+					${"add_fields_".$add_counter} = array('complete_orders_count');
+					${"add_user_spp_id_" . $add_counter} = $writer_id;
+					$add_counter++;
+					${"subtract_fields_".$subtract_counter} = array('editor_revision_orders_count');
+					${"subtract_user_spp_id_" . $subtract_counter} = $writer_id;
+					$subtract_counter++;
+				}
+			}
+			if( !empty($assigned_editors_ids) ){
+				foreach($assigned_editors_ids as $editor_id){
+					${"add_fields_".$add_counter} = array('complete_orders_count');
+					${"add_user_spp_id_" . $add_counter} = $editor_id;
+					$add_counter++;
+					${"subtract_fields_".$subtract_counter} = array('editor_revision_orders_count');
+					${"subtract_user_spp_id_" . $subtract_counter} = $editor_id;
+					$subtract_counter++;
+				}
+			}
+			if( !empty($unassigned_editors_ids_auto) ){
+				foreach($unassigned_editors_ids_auto as $editor_id){
+					${"subtract_fields_".$subtract_counter} = array('all_orders_count', 'editor_revision_orders_count');
+					${"subtract_user_spp_id_" . $subtract_counter} = $editor_id;
+					$subtract_counter++;
+					${"subtract_words_".$subtract_words_counter} = $order_words;
+					${"subtract_words_user_spp_id_" . $subtract_words_counter} = $editor_id;
+					$subtract_words_counter++;
+				}
+			}
+		}
+		else if( $revision_To_Complete ){
 			if( !empty($assigned_writers_ids) ){
 				foreach($assigned_writers_ids as $writer_id){
 					${"add_fields_".$add_counter} = array('complete_orders_count');
@@ -3155,6 +3438,26 @@ function wad_set_users_order_total_count($data = array())
 			}
 		}
 		else if( $editorRevision_To_Revision ){
+			if( !empty($assigned_writers_ids) ){
+				foreach($assigned_writers_ids as $writer_id){
+					${"add_fields_".$add_counter} = array('revision_orders_count');
+					${"add_user_spp_id_" . $add_counter} = $writer_id;
+					$add_counter++;
+					${"subtract_fields_".$subtract_counter} = array('editor_revision_orders_count');
+					${"subtract_user_spp_id_" . $subtract_counter} = $writer_id;
+					$subtract_counter++;
+				}
+			}
+			if( !empty($assigned_editors_ids) ){
+				foreach($assigned_editors_ids as $editor_id){
+					${"add_fields_".$add_counter} = array('revision_orders_count');
+					${"add_user_spp_id_" . $add_counter} = $editor_id;
+					$add_counter++;
+					${"subtract_fields_".$subtract_counter} = array('editor_revision_orders_count');
+					${"subtract_user_spp_id_" . $subtract_counter} = $editor_id;
+					$subtract_counter++;
+				}
+			}
 			if( !empty($assigned_editors_ids_auto) ){
 				foreach($assigned_editors_ids_auto as $editor_id){
 					${"add_fields_".$add_counter} = array('all_orders_count', 'revision_orders_count');
@@ -3167,6 +3470,26 @@ function wad_set_users_order_total_count($data = array())
 			}
 		}
 		else if( $revision_To_EditorRevision ){
+			if( !empty($assigned_writers_ids) ){
+				foreach($assigned_writers_ids as $writer_id){
+					${"add_fields_".$add_counter} = array('editor_revision_orders_count');
+					${"add_user_spp_id_" . $add_counter} = $writer_id;
+					$add_counter++;
+					${"subtract_fields_".$subtract_counter} = array('revision_orders_count');
+					${"subtract_user_spp_id_" . $subtract_counter} = $writer_id;
+					$subtract_counter++;
+				}
+			}
+			if( !empty($assigned_editors_ids) ){
+				foreach($assigned_editors_ids as $editor_id){
+					${"add_fields_".$add_counter} = array('editor_revision_orders_count');
+					${"add_user_spp_id_" . $add_counter} = $editor_id;
+					$add_counter++;
+					${"subtract_fields_".$subtract_counter} = array('revision_orders_count');
+					${"subtract_user_spp_id_" . $subtract_counter} = $editor_id;
+					$subtract_counter++;
+				}
+			}
 			if( !empty($unassigned_editors_ids_auto) ){
 				foreach($unassigned_editors_ids_auto as $editor_id){
 					${"subtract_fields_".$subtract_counter} = array('all_orders_count', 'revision_orders_count');
@@ -3178,7 +3501,29 @@ function wad_set_users_order_total_count($data = array())
 				}
 			}
 		}
-		else if( $complete_To_EditorRevision || $complete_To_Revision ){
+		else if( $complete_To_EditorRevision ){
+			if( !empty($assigned_writers_ids) ){
+				foreach($assigned_writers_ids as $writer_id){
+					${"add_fields_".$add_counter} = array('editor_revision_orders_count');
+					${"add_user_spp_id_" . $add_counter} = $writer_id;
+					$add_counter++;
+					${"subtract_fields_".$subtract_counter} = array('complete_orders_count');
+					${"subtract_user_spp_id_" . $subtract_counter} = $writer_id;
+					$subtract_counter++;
+				}
+			}
+			if( !empty($assigned_editors_ids) ){
+				foreach($assigned_editors_ids as $editor_id){
+					${"add_fields_".$add_counter} = array('editor_revision_orders_count');
+					${"add_user_spp_id_" . $add_counter} = $editor_id;
+					$add_counter++;
+					${"subtract_fields_".$subtract_counter} = array('complete_orders_count');
+					${"subtract_user_spp_id_" . $subtract_counter} = $editor_id;
+					$subtract_counter++;
+				}
+			}
+		}
+		else if( $complete_To_Revision ){
 			if( !empty($assigned_writers_ids) ){
 				foreach($assigned_writers_ids as $writer_id){
 					${"add_fields_".$add_counter} = array('revision_orders_count');
@@ -3688,7 +4033,7 @@ function wad_set_users_order_total_count($data = array())
 		else if( $instructionReview_To_EditorRevision ){
 			if( !empty($assigned_writers_ids) ){
 				foreach($assigned_writers_ids as $writer_id){
-					${"add_fields_".$add_counter} = array('all_orders_count', 'revision_orders_count');
+					${"add_fields_".$add_counter} = array('all_orders_count', 'editor_revision_orders_count');
 					${"add_user_spp_id_" . $add_counter} = $writer_id;
 					$add_counter++;
 					${"add_words_".$add_words_counter} = $order_words;
@@ -3699,7 +4044,7 @@ function wad_set_users_order_total_count($data = array())
 			if( !empty($assigned_editors_ids) ){
 				foreach($assigned_editors_ids as $editor_id)
 				{
-					${"add_fields_".$add_counter} = array('all_orders_count', 'revision_orders_count');
+					${"add_fields_".$add_counter} = array('all_orders_count', 'editor_revision_orders_count');
 					${"add_user_spp_id_" . $add_counter} = $editor_id;
 					$add_counter++;
 					${"add_words_".$add_words_counter} = $order_words;
@@ -3771,11 +4116,13 @@ function wad_set_users_order_total_count($data = array())
 		if( ( $add_words_user_spp_id = ${"add_words_user_spp_id_".$i} ) && ( $add_words = ${"add_words_".$i} ) )
 		{
 			$user = wad_get_user_by_id($add_words_user_spp_id);
-			
-			$set = wad_get_SET_to_ADD_WORDS($user, $add_words);
-			$where = "spp_id='{$add_words_user_spp_id}'";
-						
-			wad_update_query("users",$set, $where);
+			if( !empty($user) )
+			{			
+				$set = wad_get_SET_to_ADD_WORDS($user, $add_words);
+				$where = "spp_id='{$add_words_user_spp_id}'";
+							
+				wad_update_query("users",$set, $where);
+			}
 		
 		}
 	}
@@ -3785,11 +4132,14 @@ function wad_set_users_order_total_count($data = array())
 		{
 			$user = wad_get_user_by_id($subtract_words_user_spp_id);
 			
-			$set = wad_get_SET_to_SUBTRACT_WORDS($user, $subtract_words);
-			if( $set){
-				$where = "spp_id='{$subtract_words_user_spp_id}'";
-				
-				wad_update_query("users",$set, $where);
+			if( !empty($user) )
+			{
+				$set = wad_get_SET_to_SUBTRACT_WORDS($user, $subtract_words);
+				if( $set){
+					$where = "spp_id='{$subtract_words_user_spp_id}'";
+					
+					wad_update_query("users",$set, $where);
+				}
 			}
 		}
 	}
@@ -3893,9 +4243,11 @@ function wad_set_users_order_total_count($data = array())
 										
 					$user_spp_id = $user['spp_id'];
 					
-					$where = "spp_id='{$user_spp_id}'";
-
-					wad_update_query("users",$set, $where);
+					if( $user_spp_id ){
+						$where = "spp_id='{$user_spp_id}'";
+						wad_update_query("users",$set, $where);
+					}
+					
 				}
 			}
 		}
@@ -3974,6 +4326,11 @@ function wad_get_note_for_working_order($atts){
 	
 	$amount = wad_get_order_earning($order, $writer_spp_id);
 	$note = $writer_name . ' - ' . 'EOD '.wad_date($date_due_timestamp, 'l m/d') . ' - $'.$amount;
+	
+	$doc_link = $order["doc_link"];
+	if($doc_link)
+	$note .= '<br><a href="'.$doc_link.'" target="_blank">'.$doc_link.'</a>';
+	
 	return $note;
 }
 
@@ -3989,8 +4346,8 @@ function wad_spp_update_working_order($atts){
 	{
 		if( $note_log_action ){
 			wad_insert_query( "logs",
-				array( "from_type", "action", "source", "source_id", "time"),
-				array( "system", $note_log_action, "order", $order_id, time())
+				array( "from_type", "action", "source", "source_id", "time", "data"),
+				array( "system", $note_log_action, "order", $order_id, time(), $note)
 			);
 		}
 		if( $date_due_timestamp ){
@@ -4072,6 +4429,7 @@ function reset_orders_counter()
 		}
 	}
 	
+	$sep = '|';
 	
 	foreach($orders_assigned_users as $a)
 	{
@@ -4079,12 +4437,17 @@ function reset_orders_counter()
 		$spp_id = $a['spp_id'];
 		
 		$order = wad_get_order($order_id);
+		if( empty($order) )
+			continue;
+		
 		$status = $order['status'];
 		if( !$status){
 			continue;
 		}
 
 		$order_words = (int)$order['order_words'];
+		
+		$orders_counters_words_weekly_user_wise[$spp_id]['assigned_orders'][] = $sep.$order_id.$sep;		
 
 		if( is_writer($spp_id) )
 		{
@@ -4120,7 +4483,22 @@ function reset_orders_counter()
 				}				
 					
 			}
-			if( $status==6 || $status==9 ) //EditorRevision OR Revision
+			if( $status==6 ) //EditorRevision
+			{
+				if( isset($orders_counters_words_weekly_user_wise[$spp_id]['all_orders_count']) ){
+					$orders_counters_words_weekly_user_wise[$spp_id]['all_orders_count'] = $orders_counters_words_weekly_user_wise[$spp_id]['all_orders_count'] + 1;
+				}else{
+					$orders_counters_words_weekly_user_wise[$spp_id]['all_orders_count'] = 1;
+				}
+					
+				if( isset($orders_counters_words_weekly_user_wise[$spp_id]['editor_revision_orders_count']) ){
+					$orders_counters_words_weekly_user_wise[$spp_id]['editor_revision_orders_count'] = $orders_counters_words_weekly_user_wise[$spp_id]['editor_revision_orders_count'] + 1;
+				}else{
+					$orders_counters_words_weekly_user_wise[$spp_id]['editor_revision_orders_count'] = 1;
+				}				
+					
+			}
+			if( $status==9 ) //Revision
 			{
 				if( isset($orders_counters_words_weekly_user_wise[$spp_id]['all_orders_count']) ){
 					$orders_counters_words_weekly_user_wise[$spp_id]['all_orders_count'] = $orders_counters_words_weekly_user_wise[$spp_id]['all_orders_count'] + 1;
@@ -4170,7 +4548,21 @@ function reset_orders_counter()
 				}				
 					
 			}
-			if( $status==6 || $status==9 ) //EditorRevision OR Revision
+			if( $status==6 ) //EditorRevision
+			{
+				if( isset($orders_counters_words_weekly_user_wise[$spp_id]['all_orders_count']) ){
+					$orders_counters_words_weekly_user_wise[$spp_id]['all_orders_count'] = $orders_counters_words_weekly_user_wise[$spp_id]['all_orders_count'] + 1;
+				}else{
+					$orders_counters_words_weekly_user_wise[$spp_id]['all_orders_count'] = 1;
+				}
+					
+				if( isset($orders_counters_words_weekly_user_wise[$spp_id]['editor_revision_orders_count']) ){
+					$orders_counters_words_weekly_user_wise[$spp_id]['editor_revision_orders_count'] = $orders_counters_words_weekly_user_wise[$spp_id]['editor_revision_orders_count'] + 1;
+				}else{
+					$orders_counters_words_weekly_user_wise[$spp_id]['editor_revision_orders_count'] = 1;
+				}				
+			}
+			if( $status==9 ) //Revision
 			{
 				if( isset($orders_counters_words_weekly_user_wise[$spp_id]['all_orders_count']) ){
 					$orders_counters_words_weekly_user_wise[$spp_id]['all_orders_count'] = $orders_counters_words_weekly_user_wise[$spp_id]['all_orders_count'] + 1;
@@ -4183,7 +4575,6 @@ function reset_orders_counter()
 				}else{
 					$orders_counters_words_weekly_user_wise[$spp_id]['revision_orders_count'] = 1;
 				}				
-					
 			}
 			if( $status==3 ) //Complete
 			{
@@ -4226,17 +4617,22 @@ function reset_orders_counter()
 			$counters['working_orders_count'] = $user['working_orders_count'];
 		if( isset($user['editing_orders_count']) )
 			$counters['editing_orders_count'] = $user['editing_orders_count'];
+		if( isset($user['editor_revision_orders_count']) )
+			$counters['editor_revision_orders_count'] = $user['editor_revision_orders_count'];
 		if( isset($user['revision_orders_count']) )
 			$counters['revision_orders_count'] = $user['revision_orders_count'];
 		if( isset($user['complete_orders_count']) )
 			$counters['complete_orders_count'] = $user['complete_orders_count'];
 		if( isset($user['words_weekly']) )
 			$counters['words_weekly'] = $user['words_weekly'];
-
+		if( isset($user['assigned_orders']) ){
+			$assigned_orders_ids = implode('',$user['assigned_orders']);
+			$counters['assigned_orders'] = str_replace(array('||','|||'),'|',$assigned_orders_ids);
+		}
 		if( !empty($counters) ){
 			foreach($counters as $field => $value){
 				$set = '';
-				if( $field && $value)
+
 				$set = "{$field}='{$value}'";
 			
 				$where = "spp_id='{$spp_id}'";
@@ -4251,7 +4647,7 @@ function reset_orders_counter()
 
 function wad_set_orders_counters_to_zero(){
 	wad_update_query(
-		"users","all_orders_count='0',new_orders_count='0',working_orders_count='0',editing_orders_count='0',revision_orders_count='0',complete_orders_count='0',words_weekly='0'", 
+		"users","all_orders_count='0',new_orders_count='0',working_orders_count='0',editing_orders_count='0',editor_revision_orders_count='0',revision_orders_count='0',complete_orders_count='0',words_weekly='0'", 
 		"role='Writer' || role='Editor'"
 	);
 }
@@ -4309,8 +4705,26 @@ function wad_get_rejected_missed_orders(){
 /* NEW EMAIL SMTP */
 function wad_send_email($data)
 {
-	if( wad_test() && SITE_MOD == 'Live')
+	// if( wad_test() )
+		// return;
+	
+	$username = GMAIL_EMAIL;
+	$password = GMAIL_PASS;
+	
+	if( wad_test() ){
+		$username = TEST_GMAIL_EMAIL;
+		$password = TEST_GMAIL_PASS;
+	}
+	
+	$email_to = isset($data['to']) ? $data['to'] : '';
+	if( empty($email_to) )
 		return;
+	
+	//Do not send email if archive
+	$is_archive = wad_get_writer_or_editor_by_email($email_to, 'is_archive');
+	if( $is_archive ){
+		return;
+	}
 	
 	$mail = new PHPMailer\PHPMailer\PHPMailer(); // create a new object
 	$mail->IsSMTP(); // enable SMTP
@@ -4322,8 +4736,8 @@ function wad_send_email($data)
 	$mail->SMTPSecure = 'ssl'; // secure transfer enabled REQUIRED for Gmail
 	$mail->Host = "smtp.gmail.com";
 	$mail->Port = 465; // or 587
-	$mail->Username   = GMAIL_EMAIL;
-	$mail->Password   = GMAIL_PASS;
+	$mail->Username   = $username;
+	$mail->Password   = $password;
 	
 	$mail->IsHTML(true);
 
@@ -4437,12 +4851,17 @@ function wad_generate_report($user_spp_ids_array = array(), $data = array())
 		$user_role = $user['role'];
 		$assigned_orders_array = wad_explode_assigned_orders($user['assigned_orders']);
 		
-		foreach($assigned_orders_array as $order_id){
+		foreach($assigned_orders_array as $order_id)
+		{
+			$order = wad_get_order($order_id);
+			if(empty($order))
+				continue;
+			
 			if( in_array($order_id, $fetched_order_ids_array) ){
 				$order = $orders_array[$order_id];
 			}else{
 				$fetched_order_ids_array[] = $order_id;
-				$orders_array[$order_id] = $order = wad_get_order($order_id);
+				$orders_array[$order_id] = $order;
 			}
 			
 			$writer_claim_timestamp = $order['assigned'];
@@ -4800,6 +5219,7 @@ function wad_generate_report($user_spp_ids_array = array(), $data = array())
 function wad_query_with_fetch($query){
 	global $con;
 	$result = mysqli_query($con, $query);
+	if( $result)
 	return mysqli_fetch_all($result, MYSQLI_ASSOC);
 }
 
@@ -4808,7 +5228,7 @@ function wad_query($query){
 	mysqli_query($con, $query);
 }
 
-function seconds2human($ss) {
+function seconds2human($ss,$exclude=array()) {
 	$s = $ss%60;
 	$m = floor(($ss%3600)/60);
 	$h = floor(($ss%86400)/3600);
@@ -4817,16 +5237,38 @@ function seconds2human($ss) {
 
 	$out = array();
 
-	if($M)
+	if($M){
+		if($m>1)
 		$out[] = "$M months";
-	if($d)
+		else
+		$out[] = "$M month";
+	}
+	if($d){
+		if($d>1)
 		$out[] = "$d days";
-	if($h)
+		else
+		$out[] = "$d day";
+	}
+	if($h){
+		if($h>1)
 		$out[] ="$h hours";
-	if($m)
+		else
+		$out[] ="$h hour";
+	}
+	if($m){
+		if($m>1)
 		$out[] ="$m minutes";
-	if($s)
-		$out[] ="$s seconds";
+		else
+		$out[] ="$m minute";
+	}
+	if($s){
+		if(!in_array('second',$exclude)){
+			if($s>1)
+			$out[] ="$s seconds";
+			else
+			$out[] ="$s second";
+		}
+	}
 
 	return implode(', ',$out);
 }
@@ -4838,7 +5280,7 @@ function wad_add_update_tags_to_order($order_id, $tags = array(), $tags_old = nu
 	
 	$tags_old_array = $tags_new_array = array();
 	
-	if( !$tags_old )
+	if( $tags_old==null )
 		$tags_old = wad_get_order($order_id,'tags');
 	
 	if( $tags_old)
@@ -4858,10 +5300,18 @@ function wad_add_update_tags_to_order($order_id, $tags = array(), $tags_old = nu
 	wad_update_order($order_id, $set, $where);
 }
 
-function wad_update_order($order_id, $set_new_array,$where = null){
+function wad_update_order($order_id=null, $set_new_array,$where = null){
+	
+	if( $order_id==null)
+		return;
+	
+	$order = wad_get_order($order_id);
+	
+	if( empty($order) )
+		return;
+	
 	$set_array = array();
 	$set = '';
-	
 	
 	foreach($set_new_array as $key => $val){
 		$val = str_replace("'","''",$val);
@@ -4871,8 +5321,12 @@ function wad_update_order($order_id, $set_new_array,$where = null){
 	if( !empty($set_array))
 		$set = implode(', ',$set_array);
 	
+	if( $where==null)
+		$where = "order_id='{$order_id}'";
+	
 	if($set)
 	wad_update_query("orders",$set,$where);	
+
 }
 
 function wad_get_order_tags($order_id){
@@ -4888,17 +5342,15 @@ function wad_delete_order_tags($order_id, $tags_delete, $tags_old = null){
 	}
 	else
 	{
-		
 		$tags_array = array();
 		
-		if( !$tags_old )
+		if( $tags_old==null )
 			$tags_old = wad_get_order($order_id,'tags');
 		
-		if( is_string($tags_old) )
-			$tags_old_array = explode('||',$tags_old);
-		else
+		if( is_array($tags_old) )
 			$tags_old_array = $tags_old;
-		
+		else
+			$tags_old_array = explode('||',$tags_old);
 		
 		foreach($tags_old_array as $tag){
 			if( in_array($tag, $tags_delete) )
@@ -4987,7 +5439,7 @@ function wad_set_previous_assigned_orders_to_users($user_spp_id = null){
 
 	echo $user_spp_id;
 	echo '<pre>';
-	$records = wad_query_with_fetch("SELECT o.order_id
+	$records = wad_query_with_fetch("SELECT o.order_id, o.status
 FROM users u, orders o, order_assigned_user ou
 WHERE u.spp_id = ou.spp_id
 AND o.order_id = ou.order_id
@@ -4996,16 +5448,87 @@ AND ( o.status='5' OR o.status='6' OR o.status='9' OR o.status='12' OR o.status=
 
 	print_r($records);
 
-	
 	$order_ids_array = array();
 	$sep = '|';
+	
+	$all_orders_count = $working_orders_count = $editing_orders_count = $editor_revision_orders_count = $complete_orders_count = $revision_orders_count = 0;
+	
 	foreach($records as $rec){
 		$order_ids_array[] = $sep.$rec['order_id'].$sep;
+		
+		$status = $rec['status'];
+		
+		$all_orders_count++;
+		
+		if( $status == 5)
+			$working_orders_count++;
+		
+		if( $status == 17 || $status == 12 )
+			$editing_orders_count++;
+		
+		if( $status == 6 )
+			$editor_revision_orders_count++;
+
+		if( $status == 9 )
+			$revision_orders_count++;
+		
+		if( $status == 3 )
+			$complete_orders_count++;
+		
 	}
 	$order_ids = implode('',$order_ids_array);
 	$order_ids = str_replace(array('||','|||'),'|',$order_ids);
 	
-	wad_query("update users set assigned_orders='{$order_ids}' where spp_id='{$user_spp_id}'");
+	$set = array(
+		'assigned_orders' => $order_ids,
+		'spp_id' => $user_spp_id,
+		'all_orders_count' => $all_orders_count,
+		'working_orders_count' => $working_orders_count,
+		'editing_orders_count' => $editing_orders_count,
+		'editor_revision_orders_count' => $editor_revision_orders_count,
+		'revision_orders_count' => $revision_orders_count,
+		'complete_orders_count' => $complete_orders_count
+	);
+	
+	print_r($set);
+	
+	wad_update_user($user_spp_id, $set);
+	
+	// wad_query("update users set assigned_orders='{$order_ids}' where spp_id='{$user_spp_id}'");
+	
+	echo '</pre>';
+ 
+}
+
+function wad_set_weekly_orders_to_users($user_spp_id = null){
+	if( !$user_spp_id )
+		return;
+	
+	wad_query("update users set words_weekly='' where spp_id='{$user_spp_id}'");
+
+	echo $user_spp_id;
+	echo '<pre>';
+	
+	$timestamp_of_monday_first_day_of_the_week = wad_get_timestamp_of_monday_first_day_of_the_week();
+	$timestamp_of_sunday_last_day_of_the_week = wad_get_timestamp_of_sunday_last_day_of_the_week();
+	
+	$records = wad_query_with_fetch("SELECT o.order_id, o.order_words, o.assigned
+FROM users u, orders o, order_assigned_user ou
+WHERE u.spp_id = ou.spp_id
+AND o.order_id = ou.order_id
+AND (u.spp_id='{$user_spp_id}')
+AND ( o.status='5' OR o.status='6' OR o.status='9' OR o.status='12' OR o.status='3' OR o.status='17' )
+AND (o.assigned >= '{$timestamp_of_monday_first_day_of_the_week}' AND o.assigned <= '{$timestamp_of_sunday_last_day_of_the_week}')");
+
+	print_r($records);
+	
+	$words_weekly = 0;
+	$order_ids_array = array();
+	foreach($records as $rec){
+		$words_weekly += $rec['order_words'];
+	}
+	
+	wad_query("update users set words_weekly='{$words_weekly}' where spp_id='{$user_spp_id}'");
 	
 	echo '</pre>';
  
@@ -5025,8 +5548,8 @@ function wad_set_date_due_for_orders($order_ids_arr = array()){
 	
 	$orders = wad_get_orders("*", $where_order);
 	
-	foreach($orders as $order){
-		
+	foreach($orders as $order)
+	{	
 		$order_id = $order['order_id'];
 		$date_due = $order['created'] + 777600+14400;
 		
@@ -5035,11 +5558,8 @@ function wad_set_date_due_for_orders($order_ids_arr = array()){
 		$post = array(
 			"date_due"		=> date('Y-m-d H:i:s', $date_due),
 		);
-		wad_spp_update_order($order_id, $post);
-
-		
-	}
-	
+		wad_spp_update_order($order_id, $post);	
+	}	
 }
 
 function wad_explode_assigned_orders($assigned_orders_str = null, $sep = '|'){
@@ -5049,7 +5569,51 @@ function wad_explode_assigned_orders($assigned_orders_str = null, $sep = '|'){
 	return array_filter(explode($sep,$assigned_orders_str));
 }
 
-function wad_delete_order($order_id, $remove_everything = null){
+function wad_get_add_order_doc_link_to_order_docs_table_from_logs($order_ids_arr = array()){
+	if( empty($order_ids_arr ))
+		return;
+	
+	$where_order = array();
+	foreach($order_ids_arr as $order_id){
+		$where_order[] = "order_id='{$order_id}'";
+	}
+	$where_order = implode(' OR ',$where_order);
+	
+	$orders = wad_get_orders("order_id, doc_link", $where_order);
+	foreach($orders as $order)
+	{
+		$order_id = $order['order_id'];
+		$doc_link = trim($order['doc_link']);
+		
+		if(!$doc_link){
+			$order_logs = wad_query_with_fetch("SELECT * from `logs` where source_id='{$order_id}' AND `action`='google doc created'");
+			$doc_link = isset($order_logs[0]['data']) ? trim($order_logs[0]['data']) : '';
+		}
+		if( $doc_link && !empty($doc_link)){
+			wad_insert_query( "order_docs",
+				array( "order_id", "doc_link"),
+				array( $order_id, $doc_link)
+			);
+		}
+	}
+	
+}
+
+function wad_add_order_doc_link_if_not_avail($order_id, $doc_link = null)
+{
+	$doc_link = trim($doc_link);
+	if(!$doc_link){
+		$order_doc = wad_query_with_fetch("SELECT * from `order_docs` where order_id='{$order_id}'");
+		$doc_link = isset($order_doc[0]['doc_link']) ? trim($order_doc[0]['doc_link']) : '';
+	}
+	
+	if( $doc_link && !empty($doc_link)){
+		wad_update_query("orders","doc_link='{$doc_link}'", "order_id='{$order_id}'");
+	}	
+	
+}
+
+function wad_delete_order($order_id, $remove_everything = true){
 	wad_delete_query("orders", "order_id='{$order_id}'");
 	if( $remove_everything ){
 		wad_delete_query("order_assigned_user", "order_id='{$order_id}'");
@@ -5059,6 +5623,7 @@ function wad_delete_order($order_id, $remove_everything = null){
 		wad_delete_query("order_final_review", "order_id='{$order_id}'");
 		wad_delete_query("order_revisions", "order_id='{$order_id}'");
 		wad_delete_query("logs", "source_id='{$order_id}' AND source='order'");
+		wad_delete_query("user_rejected_order", "order_id='{$order_id}'");
 	}
 	
 	if( wad_get_option('save_log') == 'yes')
@@ -5070,9 +5635,13 @@ function wad_delete_order($order_id, $remove_everything = null){
 
 }
 
+function test_working(){
+	echo 'test function working...';
+}
+
 function wad_set_get_order_id_IN($order_ids_arr = array()){
 	if( empty($order_ids_arr) )
-		return;
+		return "''";
 	
 	$order_ids_IN = '';
 	foreach($order_ids_arr as $order_id){
@@ -5083,3 +5652,412 @@ function wad_set_get_order_id_IN($order_ids_arr = array()){
 	return $order_ids_IN;
 
 }
+
+function wad_set_get_IN($array = array()){
+	if( empty($array) )
+		return "''";
+	
+	$ids_IN = '';
+	foreach($array as $id){
+		$ids_IN .= "'". $id . "',";
+	}
+	$ids_IN = rtrim($ids_IN, ",");
+	
+	return $ids_IN;
+
+}
+
+function wad_update_user($user_id, $set_new_array,$where = null){
+	
+	$user = wad_get_user_by_id($user_id);
+	
+	if( empty($user) )
+		return;
+	
+	$set_array = array();
+	$set = '';
+	
+	if( empty($set_new_array))
+		return;
+	
+	foreach($set_new_array as $key => $val){
+		$val = str_replace("'","''",$val);
+		$set_array[] = "{$key}='{$val}'";
+	}
+	
+	if( !empty($set_array))
+		$set = implode(', ',$set_array);
+	
+	if( $where == null ){
+		$where = "spp_id='{$user_id}'";
+	}
+	
+	if($set)
+	wad_update_query("users",$set,$where);	
+}
+
+function wad_add_all_orders_from_spp($data){
+	
+	global $api_username, $api_password, $api_url;
+	
+	$limit = isset($_REQUEST['limit']) ? $_REQUEST['limit'] : $data['limit'];
+	$offset = isset($_REQUEST['offset']) ? $_REQUEST['offset'] : $data['offset'];
+	$end = isset($_REQUEST['end']) ? $_REQUEST['end'] : $data['end'];
+	
+	while($offset <= $end){
+	
+		$curl_url = $api_url."/api/v1/orders?limit={$limit}&offset={$offset}";
+		$ch = curl_init();
+		curl_setopt($ch, CURLOPT_URL,$curl_url);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER,1);
+		curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+		curl_setopt($ch, CURLOPT_USERPWD, "$api_username:$api_password");
+		$orders = json_decode(curl_exec($ch));
+		curl_close($ch);
+		
+		// echo json_encode($orders); exit;
+		
+		// $orders = '[{"id":"ED907AE6_1","date_added":"2021-09-13T12:24:16+0000","date_updated":null,"date_started":"2021-09-13T12:24:16+0000","date_completed":null,"date_due":"2021-09-22T12:24:16+0000","status":"Submitted","price":"700.00","quantity":1,"options":{"How many words?":"700"},"currency":"WRD","paysys":"Account Balance","invoice_id":"ED907AE6","service":"Using Web Scraping to Become More Competitive in Your Industry","service_id":"20","user_id":"3892","employees":[{"id":"6","name_f":"Christopher","name_l":"Valvo","group_id":"1","role_id":"1"},{"id":"9","name_f":"Sarah","name_l":"D","group_id":"1","role_id":"1"},{"id":"2771","name_f":"Shilpa","name_l":"","group_id":"1","role_id":"1"},{"id":"2898","name_f":"Riza","name_l":"Megerle","group_id":"2","role_id":"9"}],"note":null,"tags":["Bulk Order","Luden Investments"],"subscription":null,"client":{"id":"3892","date_added":"2021-03-19T11:41:41+0000","name_f":"Jonathan","name_l":"Liebenberg","email":"jonathan@ludenseo.com","company":"Luden Investments","tax_id":"","phone":"","address":{"line_1":"Senior Drive","city":"Johannesburg","state":"Gauteng","postcode":"2115","country":"ZA"},"note":null,"balance":"36800.00","optin":"Yes","stripe_customer_id":"cus_J8ziC2vm7rfcbj","custom_fields":{},"status":"client","employee_id":null,"spent":null,"ga_cid":"2145198855.1615366644","aff_id":null},"form_data":{"How many articles do you need?":"2","Order Instructions":["https:\/\/app.wordagents.com\/files\/field\/qnz87OXP98YW\/techdimcom-USW-WA-Order-Sheet1.pdf","https:\/\/app.wordagents.com\/files\/field\/qnz87OXP98YW\/techdimcom-ZNS-WA-Order-Sheet1.pdf"],"I confirm my uploaded brief is accurate and complete. I understand that missing\/contradictory information may lead to production delays. I recognize that WordAgents may decline any revision request outside the brief details.":"Yes","I have read and agree to the WordAgents terms and guarantees.":"Yes","Title":"Using Web Scraping to Become More Competitive in Your Industry"},"addons":[]}]';
+
+		// $orders = json_decode($orders);
+		
+		foreach($orders as $order){
+			
+			$currency = isset($order->currency) ? $order->currency : '';
+			if( $currency != 'WRD')
+				continue;
+			
+			$form_data 	= $order->{'form_data'};
+			$order_id = $order->id;
+			$order_title = $order->service;
+			$order_words = (int) (preg_replace("/[^0-9.]/", "", $order->{'options'}->{'How many words?'}));
+			$tool = isset($form_data->{'Which tool would you like us to use to optimize your article?'}) ? 1 : 0;
+			$created = strtotime($order->date_added);
+			$started = strtotime($order->date_started);
+			$spp_date_due = $date_due = strtotime($order->date_due);
+			$tags_array = $order->tags;
+			$tags = ($tags_array) ? implode('||',$tags_array) : null;
+			$order_status_label = $order->status;
+			$employees = $order->employees;
+			$status = wad_get_status_id($order_status_label);
+			
+			$result = wad_select_query("orders","order_id","order_id='{$order_id}'");
+			$is_order_exist = mysqli_num_rows($result);
+			
+			if( !$is_order_exist )
+			{
+				$is_writer_assigned = $is_editor_assigned = $is_ReadyToEdit = $is_EditorRevision = $is_FinalReview = false;
+				
+				if( !empty($employees) ){
+					foreach($employees as $employee){
+						$employee_id = $employee->id;
+						wad_insert_query("order_assigned_user",array('order_id','spp_id'),array($order_id, $employee_id));
+						wad_save_assigned_orders_to_user($employee_id, $order_id);
+						
+						if( is_writer($employee_id) ){
+							$is_writer_assigned = true;
+						}
+						if( is_editor($employee_id) ){
+							$is_editor_assigned = true;
+						}
+					}
+				}
+				
+				if( !empty($tags_array) ){
+					foreach($tags_array as $tag){
+						if( $tag == 'Ready to Edit' )
+							$is_ReadyToEdit = true;
+						
+						if( $tag == 'Editor Revision' )
+							$is_EditorRevision = true;
+
+						if( $tag == 'Final Review' )
+							$is_FinalReview = true;
+					}
+				}
+				
+				if( $is_writer_assigned && !$is_ReadyToEdit && !$is_EditorRevision && $order_status_label == 'Working' )
+					$status = 5; //Working
+				
+				if( $is_writer_assigned && $is_ReadyToEdit && !$is_EditorRevision && $order_status_label == 'Working')
+					$status = 17; //ReadyToEdit
+				
+				if( $is_editor_assigned && !$is_ReadyToEdit && !$is_EditorRevision && $order_status_label == 'Editing')
+					$status = 12; //Editing
+				
+				if( $is_editor_assigned && !$is_ReadyToEdit && $is_EditorRevision && $order_status_label == 'Working')
+					$status = 6; //EditorRevision
+				
+				if( $is_FinalReview ){
+					wad_insert_query( "order_final_review",
+						array( "from_type", "order_id", "time"),
+						array( "System", $order_id, time())
+					);
+				}
+				
+				if( $is_EditorRevision ){
+					wad_insert_query( "order_editor_revision",
+						array( "from_type", "order_id", "time"),
+						array( "System", $order_id, time())
+					);
+				} 
+				
+				if( $status == 9 ){
+					wad_insert_query( "order_client_revision",
+						array( "from_type", "order_id", "time"),
+						array( "System", $order_id, time())
+					);
+				}
+				
+				wad_insert_query("orders",
+					array('order_id','order_title','is_tool','created','started','date_due','spp_date_due','order_words','tags','status'),
+					array($order_id, $order_title, $tool, $created, $started, $date_due, $date_due, $order_words, $tags, $status)
+				);
+				
+				global $con;
+				
+				$last_id = mysqli_insert_id($con);
+				
+				echo $last_id.'. <a href="https://app.wordagents.com/orders/'.$order_id.'" target="_blank">'.$order_id .'</a> --- SPP: ' . $order_status_label . '--- OG: '.$status.'---'.wad_get_status_label($status).'<br>';
+			}
+		}
+		
+		$offset += $limit;
+	
+	}
+	
+	
+	// exit;	
+}
+
+function wad_add_all_team_members(){
+	
+	echo '<pre>';
+	
+	$add_team = isset($_REQUEST['add_team']) ? 1 : 0;
+	$add_users = isset($_REQUEST['add_users']) ? 1 : 0;
+	
+	include "team_members.php";
+	
+	// print_r($team_members);
+	
+	$already_added_team_members = $new_added_team_members = $new_added_users = $already_added_users = array();
+
+	foreach($team_members as $member){
+		
+		$email = $member['email'];
+		$role = wad_get_role_label($member['role_id']);
+		$spp_id = $member['id'];
+		$name_f = $member['name_f'];
+		$name_l = $member['name_l'];
+		
+		$name = ($name_f) ? $name_f : '';
+		$name .= ($name_l) ? ' '.$name_l : '';
+		
+		if( $add_team )
+		{
+			$is_team_member_exist = wad_get_total_count("spp_team","email='{$email}'");
+			if(!$is_team_member_exist) {
+				wad_insert_query(
+					"spp_team",
+					array('email','role','spp_id', ),
+					array($email, $role, $spp_id)
+				);
+				$new_added_team_members[] = $email;
+			}else{
+				$already_added_team_members[] = $email;
+			}
+		}
+		
+		if( $add_users)
+		{
+			$is_user_exist = wad_get_total_count("users","spp_id='{$spp_id}'");
+			if(!$is_user_exist) {
+				wad_insert_query(
+					"users",
+					array('name','email','role','spp_id' ),
+					array($name, $email, $role, $spp_id)
+				);
+				$new_added_users[] = $email;
+			}else{
+				$already_added_users[] = $email;
+			}
+		}
+	}
+	
+	if( $add_team ){
+	
+	echo '<h1> New Added Team Members </h1>';
+	print_r($new_added_team_members);
+
+	echo '<h1> Already Added Team Members</h1>';
+	print_r($already_added_team_members);
+
+	}
+	
+	if( $add_users ){
+
+	echo '<h1> New Added Users</h1>';
+	print_r($new_added_users);
+
+	echo '<h1> Already Added Users</h1>';
+	print_r($already_added_users);
+
+	}
+	
+	echo '</pre>';
+	
+}	
+
+
+function wad_get_role_label($role_id){
+	$label = '';
+	switch($role_id){
+		case '1': 	$label = 'Admin'; break;
+		case '2': 	$label = 'Customer Success'; break;
+		case '3': 	$label = 'Contractor'; break;
+		case '4': 	$label = 'Writer'; break;
+		case '5': 	$label = 'Team Leader'; break;
+		case '6': 	$label = 'Director of Content Operations'; break;
+		case '7': 	$label = 'Editor'; break;
+		case '8': 	$label = 'HR'; break;
+		case '9': 	$label = 'Assigner'; break;
+		case '10': 	$label = 'QA Manager'; break;
+		case '12': 	$label = 'Data Analyst'; break;
+	}
+	return $label;	
+}
+
+
+function is_order_claimed_this_week($claim_timestamp=null){
+	if($claim_timestamp==null)
+		return;
+	
+	$first_day_of_this_week_timestamp = strtotime('this week');
+	$this_week_begin_timestamp = strtotime('today',$first_day_of_this_week_timestamp);
+
+	$last_day_of_this_week_timestamp = strtotime('next week');
+	$this_week_end_timestamp = strtotime('today',$last_day_of_this_week_timestamp)-1;
+	
+	if( $claim_timestamp >= $this_week_begin_timestamp && $claim_timestamp <= $this_week_end_timestamp )
+		return true;
+	
+	return false;
+}
+
+
+function wad_get_per_page(){
+	return isset($_REQUEST['per_page']) ? $_REQUEST['per_page'] : (( wad_get_option('orders_per_page') ) ? wad_get_option('orders_per_page') : 50);
+}
+
+require "wad_stats_writers.php";
+
+require "wad_stats_editors.php";
+
+function wad_set_time_for_rejected_orders_from_logs($order_ids_arr = array()){
+	if( empty($order_ids_arr ))
+		return;
+	
+	foreach($order_ids_arr as $order_id){
+		
+		$result = wad_select_query("logs","time","action='rejected' AND source='order' AND source_id='{$order_id}'");
+		$logs = mysqli_fetch_all($result, MYSQLI_ASSOC);
+		
+		$time = isset($logs[0]['time']) ? $logs[0]['time'] : '';
+
+		if( $time ){
+			wad_update_query("user_rejected_order","time='{$time}'", "order_id='{$order_id}'");
+		}else{
+			echo 'not available for '.$order_id.'<br>';
+		}
+	}
+}
+
+function wad_get_current_page_relative_class(){
+	return str_replace('/','-',wad_get_current_url(true));
+}
+
+
+function wad_get_working_order_note_by_order_id($order_id){
+
+	$order = wad_get_order($order_id);
+	$doc_link = $order['doc_link'];
+	$date_due_timestamp = wad_get_working_orders_due_timestamp($order);
+
+	$assigned_writers = wad_get_assigned_writers($order_id);
+	$writer_firstname = wad_get_name_part('first',$assigned_writers[0]['name']);
+
+	$data_get_note_for_working_order = array(
+		'order' => $order, 
+		'order_id' => $order_id,
+		'writer_name' => $writer_firstname,
+		'writer_spp_id' => $assigned_writers[0]['spp_id'],
+		'date_due_timestamp' => $date_due_timestamp,
+	);
+
+	$note = wad_get_note_for_working_order( $data_get_note_for_working_order );
+	return $note;
+}
+
+function wad_get_working_orders_due_timestamp($order)
+{
+	$order_words = $order['order_words'];
+	$writer_claim_time = $order['assigned'];
+	
+	return wad_get_order_due_date($order_words, $writer_claim_time);
+}
+
+
+function wad_get_order_due_date($order_words, $writer_claim_time){
+	
+	if( $order_words <= 2000 ){ 
+		$date_due_timestamp = strtotime('+48 hours', $writer_claim_time); //2 days
+	}
+	else if( $order_words >= 2001 AND $order_words <= 3499 ){
+		$date_due_timestamp = strtotime('+72 hours', $writer_claim_time); //3 days
+	}
+	else if( $order_words >= 3500 AND $order_words <= 5499 ){
+		$date_due_timestamp = strtotime('+96 hours', $writer_claim_time); //4 days
+	}
+	else if( $order_words >= 5500 AND $order_words <= 7499 ){
+		$date_due_timestamp = strtotime('+120 hours', $writer_claim_time);//5 days
+	}
+	else{
+		$date_due_timestamp = strtotime('+168 hours', $writer_claim_time); //7 days
+	}
+	
+	return $date_due_timestamp;
+	
+}
+
+function seconds2hours($seconds){
+	$hours = ($seconds/60)/60;
+	return number_format($hours, 2);
+}
+
+
+require "wad_writers_weekly_stats.php";
+
+require "wad_editors_weekly_stats.php";
+
+function wad_get_order_tags_array($order){
+	return isset($order['tags']) ? explode('||',$order['tags']) : array();
+}
+
+require "wad_all_orders_table.php";
+
+require "wad_available_orders_table.php";
+
+require "wad_working_orders_table.php";
+
+require "wad_editing_orders_table.php";
+
+require "wad_editor_revision_orders_table.php";
+
+require "wad_client_revision_orders_table.php";
+
+require "wad_complete_orders_table.php";
+
+require "wad_pending_earning_orders_table.php";
+
+require "wad_total_earning_orders_table.php";

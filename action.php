@@ -8,6 +8,7 @@ if( $action == 'signup_form_submit' )  // signup_form_submit - START
 	$name = $_POST['fullname'];
 	$email = $_POST['email'];
 	$password = $_POST['password'];
+	$user_role = $_POST['role'];
 	
 	$password_hash = password_hash($password, PASSWORD_DEFAULT);
 	$authtoken_hash = password_hash($password, PASSWORD_DEFAULT);
@@ -15,25 +16,78 @@ if( $action == 'signup_form_submit' )  // signup_form_submit - START
 	$role = '';
 	$spp_id = '';
 	
-	$query = "SELECT * FROM users WHERE email='".$email."'";
+	$query = "SELECT * FROM users WHERE email='".$email."' && registered=1";
 	$result = mysqli_query($con, $query);
-	$is_user_exist = mysqli_num_rows($result);
+	$is_user_registered = mysqli_num_rows($result);
 	
-	if($is_user_exist) {
-		$message = "User already exist with this email address.";
+	if($is_user_registered) {
+		$message = "User already registered with this email address.";
 		$message_type = 'danger';
 	} else {
 	
 		$team = wad_get_team_member_by_email($email);
 		
-		$role = $team['role'];
-		$spp_id = $team['spp_id'];
-		$weekly_quota = $team['weekly_quota'];
-		
-		$insert_query = "INSERT INTO users(name, email, password, authtoken, role, spp_id, weekly_quota) VALUES('".$name."', '".$email."', '".$password_hash."', '".$authtoken_hash."', '".$role."', '".$spp_id."', '".$weekly_quota."')";
-		mysqli_query($con, $insert_query);
-		$message = "Your account has been created successfully";
-		$message_type = 'success';
+		if( empty($team) ){
+			$message = "User not exists. Please contact admin to add in OG";
+			$message_type = 'danger';			
+		}else{
+			$role = $team['role'];
+			$spp_id = $team['spp_id'];
+			$weekly_quota = $team['weekly_quota'];
+			$enable_weekly_quota = $team['enable_weekly_quota'];
+			$onetime_quota = $team['onetime_quota'];
+			$enable_onetime_quota = $team['enable_onetime_quota'];
+			$enable_claim = $team['enable_claim'];
+			$is_archive = $team['is_archive'];
+			$registered = 1;
+			$editor_revision_count_limit = $team['editor_revision_count_limit'];
+			$claim_one_order = $team['claim_one_order'];
+			
+			$query = "SELECT * FROM users WHERE email='".$email."'";
+			$result = mysqli_query($con, $query);
+			$is_user_exist = mysqli_num_rows($result);
+			
+			if( $is_user_exist ){
+				$set = array(
+					'name' => $name,
+					'email' => $email,
+					'password' => $password_hash,
+					'authtoken' => $authtoken_hash,
+					'role' => $role,
+					'weekly_quota' => $weekly_quota,
+					'enable_weekly_quota' => $enable_weekly_quota,
+					'onetime_quota' => $onetime_quota,
+					'enable_onetime_quota' => $enable_onetime_quota,
+					'enable_claim' => $enable_claim,
+					'is_archive' => $is_archive,
+					'registered' => $registered,
+					'editor_revision_count_limit' => $editor_revision_count_limit,
+					'claim_one_order' => $claim_one_order
+				);
+				wad_update_user($spp_id, $set);
+				
+				$message = "Your account has been registered successfully";
+				$message_type = 'success';
+				
+			}else{
+				
+				if( $user_role != $role ){
+					$message = "User role not matched!";
+					$message_type = 'danger';
+					return;
+				}
+				
+				wad_insert_query(
+					"users",
+					array('name','email','password', 'authtoken', 'role', 'spp_id', 'weekly_quota','enable_weekly_quota','onetime_quota','enable_onetime_quota','enable_claim','is_archive','registered','editor_revision_count_limit','claim_one_order'),
+					array($name, $email, $password_hash, $authtoken_hash, $role, $spp_id, $weekly_quota, $enable_weekly_quota, $onetime_quota, $enable_onetime_quota, $enable_claim,$is_archive,$registered,$editor_revision_count_limit,$claim_one_order)
+				);
+				
+				$message = "Your account has been created successfully";
+				$message_type = 'success';
+
+			}
+		}
 	}
 	
 } // signup_form_submit - END
@@ -59,15 +113,21 @@ if( $action == 'login_form_submit' )  // login_form_submit - START
 			unset($user['password']);
 			unset($user['authtoken']);
 			
-			setCookie('wad_user_logged_in',true, strtotime( '+10 years' ));
-			setCookie('wad_user_logged_in_spp_id',openssl_encrypt($user['spp_id'], "AES-128-ECB", SECURE_KEY), strtotime( '+10 years' ));
+			$is_archive = $user['is_archive'];
 			
-			if( $user['role'] == 'Admin' ){
-				$redirect_to_after_login = BASE_URL.'/admin';
+			if( $is_archive ){
+				
+				$message = "Your account is archived. So you can not login and will not recieve any notifications";
+				$message_type = 'danger';
+				
+			}else{
+				
+				//Login account. Maintain cookies.
+				setCookie('wad_user_logged_in',true, strtotime( '+10 years' ));
+				setCookie('wad_user_logged_in_spp_id',openssl_encrypt($user['spp_id'], "AES-128-ECB", SECURE_KEY), strtotime( '+10 years' ));
+				
+				header("Location: ".$redirect_to_after_login);
 			}
-			
-			header("Location: ".$redirect_to_after_login);
-			
 		}
 	} else {		
 		$message = "No account exist with entered email address.";
@@ -105,7 +165,7 @@ if( $action == 'forgot_form_submit' )  // forgot_form_submit - START
 		$data['message'] = $msg;
 		$data['to'] = $email;
 		// $data['debug'] = 1;
-		
+		$email_sent = 0;
 		$send_email_response = wad_send_email($data);
 		// if(mail($email, $subject, $msg, $headers)) {
 		if( $send_email_response == 'sent'){
@@ -176,6 +236,10 @@ if( $action == 'writer_submit_working_order' )  // writer_submit_working_order -
 	$employee_name = $employee['name'];
 			
 	$order_info = wad_get_spp_order_info($order_id);
+	$spp_order_status = isset($order_info['status']) ? $order_info['status'] : '';
+	if( $spp_order_status=='error' || empty($order_info) )
+		return;
+	
 	$order_title = $order_info['service'];
 	$note = $order_info['note'];
 	
@@ -188,6 +252,7 @@ if( $action == 'writer_submit_working_order' )  // writer_submit_working_order -
 	$is_note_updated = false;
 	if (strpos($note, 'docs.google.com') === false) {
 		$doc_link = wad_get_order($order_id,"doc_link");
+		if( $doc_link)
 		$note .= '<br><a href="'.$doc_link.'" target="_blank">'.$doc_link.'</a>';
 		$post["note"] = $note;
 		$is_note_updated = true;
@@ -238,8 +303,8 @@ if( $action == 'writer_submit_working_order' )  // writer_submit_working_order -
 		
 		if( $is_note_updated ){
 			wad_insert_query( "logs",
-				array( "from_type", "from_id", "action", "source", "source_id", "time"),
-				array( "system", $employee_id, "updated note", "order", $order_id, time())
+				array( "from_type", "from_id", "action", "source", "source_id", "time", "data"),
+				array( "system", $employee_id, "updated note", "order", $order_id, time(),$note)
 			);
 		}
 
@@ -253,8 +318,9 @@ if( $action == 'writer_submit_working_order' )  // writer_submit_working_order -
 		
 		$writer_firstname = wad_get_name_part('first',$employee_name);
 		
-		$link_to_OG_new_orders = BASE_URL.'/orders';	
-		$order_link = "https://app.wordagents.com/orders/".$order_id;
+		$link_to_OG_new_orders = BASE_URL.'/orders';
+		// $order_link = "https://app.wordagents.com/orders/".$order_id;
+		$order_link = BASE_URL."/orders/editing?order={$order_id}&openpopup=true";
 		
 		$msg = "Hi {{writer_firstname}},<br />Your order <a href='{$order_link}'>{{order_title}} - {{order_number}}</a> has been successfully submitted for editing.<p>To claim new orders, go to the <a href='{{link_to_OG_new_orders}}'>self-service dashboard</a>.</p><p>If you need help, contact <a href='mailto:talent@wordagents.com'>talent@wordagents.com</a></p>";
 		
@@ -269,7 +335,7 @@ if( $action == 'writer_submit_working_order' )  // writer_submit_working_order -
 		$data['message'] = $msg;
 		$data['to'] = $employee_email;
 		// $data['debug'] = 1;
-		
+		$email_sent = 0;
 		$send_email_response = wad_send_email($data);
 		// if( mail($employee_email, $subject, $msg, $headers) ){
 		if( $send_email_response == 'sent'){
@@ -339,6 +405,19 @@ if( $action == 'writer_reject_working_order' )  // writer_reject_working_order -
 	
 	wad_update_query("users","rejected_order_ids='{$rejected_order_ids}'", "spp_id='{$employee_id}'"); //uncomment
 	
+	$post = array(
+		'writer_name' => $writer_rejected['name'],
+		'order_id' => $order_id,
+	);
+	// zap link: https://zapier.com/app/editor/130103282
+	$curl_url = "https://hooks.zapier.com/hooks/catch/8157470/busk1bg/";
+	$ch = curl_init();
+	curl_setopt($ch, CURLOPT_URL,$curl_url);
+	curl_setopt($ch, CURLOPT_RETURNTRANSFER,1);
+	curl_setopt($ch, CURLOPT_POST, 1);
+	curl_setopt($ch, CURLOPT_POSTFIELDS, $post);
+	$r = curl_exec($ch);
+	
 	//NEW - Incrementing Writers' new orders total count except rejected writers
 	//NEW - Decrementing all and working orders total count for the rejected writer
 	$args = array(
@@ -380,10 +459,10 @@ if( $action == 'writer_reject_working_order' )  // writer_reject_working_order -
 			array( "from_type", "action", "source", "source_id", "time", "data"),
 			array( "System", "changed order status", "order", $order_id, time(), $status)
 		);
-		// wad_insert_query( "logs",
-			// array( "from_type", "action", "source", "source_id", "time"),
-			// array( "system", "deleted note", "order", $order_id, time())
-		// );
+		wad_insert_query( "logs",
+			array( "from_type", "action", "source", "source_id", "time", "data"),
+			array( "system", "deleted note", "order", $order_id, time(),"")
+		);
 		wad_insert_query( "logs",
 			array( "from_type", "action", "source", "source_id", "time", "data"),
 			array( "system", "changed due date", "order", $order_id, time(), $spp_date_due)
@@ -399,8 +478,9 @@ if( $action == 'writer_reject_working_order' )  // writer_reject_working_order -
 		$writer_rejected_spp_id = $writer_rejected['spp_id'];
 		$link_to_OG_new_orders = BASE_URL.'/orders';
 		$link_claim = BASE_URL.'?action=writer_claim_order&order_id='.$order_id.'&employee_id='.$writer_rejected_spp_id;
-		$order_link = "https://app.wordagents.com/orders/".$order_id;
-		
+		//$order_link = "https://app.wordagents.com/orders/".$order_id;
+		$order_link = BASE_URL."/orders?order={$order_id}&openpopup=true";
+
 		$msg = "Hi {{writer_firstname}},<br/>This email is to confirm that you've rejected order <a href='{$order_link}'>{{order_title}} - {{order_number}}</a>. If you've rejected this order in error, you can re-claim it <a href='{{link_claim}}'>here</a>. Or, to claim new orders, go to the <a href='{{link_to_OG_new_orders}}'>self-service dashboard</a>.<p>If you need help, contact <a href='mailto:talent@wordagents.com'>talent@wordagents.com</a></p>.";
 		
 		$msg = str_replace(
@@ -414,7 +494,7 @@ if( $action == 'writer_reject_working_order' )  // writer_reject_working_order -
 		$data['message'] = $msg;
 		$data['to'] = $writer_rejected['email'];
 		// $data['debug'] = 1;
-		
+		$email_sent = 0;
 		$send_email_response = wad_send_email($data);
 		// if( mail($writer['email'], $subject, $msg, $headers) ){
 		if( $send_email_response == 'sent'){
@@ -487,21 +567,19 @@ if( $action == 'editor_request_revision_editing_order' )  // editor_request_revi
 		array( "System", $employee_id, $order_id, time())
 	);
 
-
-	//NEW - Incrementing revision orders count to the editor who requested the revision
-	//NEW - Decrementing editing orders count to the editor who requested the revision
-	//NEW - Incrementing revision orders count to the assigned writer.
-	//NEW - Decrementing editing orders count to the assigned writer.
+	$assigned_writer_spp_id = isset($assigned_writers[0]['spp_id']) ? $assigned_writers[0]['spp_id'] : '';
 	$args = array(
-		'add' => array('revision_orders_count'),
+		'add' => array('editor_revision_orders_count'),
 		'add_user_spp_id' => $employee_id,
 		'subtract' => array('editing_orders_count'),
-		'subtract_user_spp_id' => $employee_id,
-		'add_2' => array('revision_orders_count'),
-		'add_user_spp_id_2' =>$assigned_writers[0]['spp_id'],
-		'subtract_2' => array('editing_orders_count'),
-		'subtract_user_spp_id_2' => $assigned_writers[0]['spp_id'],
+		'subtract_user_spp_id' => $employee_id
 	);
+	if($assigned_writer_spp_id){
+		$args['add_2'] = array('editor_revision_orders_count');
+		$args['add_user_spp_id_2'] = $assigned_writer_spp_id;
+		$args['subtract_2'] = array('editing_orders_count');
+		$args['subtract_user_spp_id_2'] = $assigned_writer_spp_id;
+	}
 	wad_set_users_order_total_count($args);
 	//END
 		
@@ -540,7 +618,8 @@ if( $action == 'editor_request_revision_editing_order' )  // editor_request_revi
 
 			$writer_email = $writer['email'];
 			$writer_firstname = wad_get_name_part('first',$writer['name']);
-			$order_link = "https://app.wordagents.com/orders/".$order_id;
+			// $order_link = "https://app.wordagents.com/orders/".$order_id;
+			$order_link = BASE_URL."/orders/revisions/editor?order={$order_id}&openpopup=true";
 			
 			$msg = " Hi {{writer_firstname}},<br />Your editor, {{editor_name}}, has requested some revisions to order <a href='{$order_link}'>{{order_title}} - {{order_number}}</a>.<br />{{message_provided_by_the_editor}}<p>Additional notes may be in the Google Doc comments. Please make the required changes and re-submit by {{due_date_time}}.</p><p>If you need help, contact <a href='mailto:talent@wordagents.com'>talent@wordagents.com</a>.</p>";
 			
@@ -555,7 +634,7 @@ if( $action == 'editor_request_revision_editing_order' )  // editor_request_revi
 			$data['message'] = $msg;
 			$data['to'] = $writer_email;
 			// $data['debug'] = 1;
-			
+			$email_sent = 0;
 			$send_email_response = wad_send_email($data);
 			// if( mail($employee_email, $subject, $msg, $headers) ){
 			if( $send_email_response == 'sent'){
@@ -577,8 +656,8 @@ if( $action == 'editor_request_revision_editing_order' )  // editor_request_revi
 
 			$editor_email = $editor['email'];
 			$editor_firstname = wad_get_name_part('first',$editor['name']);
-			$writer_firstname = wad_get_name_part('first',$assigned_writers[0]['name']);
-			$order_link = "https://app.wordagents.com/orders/".$order_id;
+			$writer_firstname = isset($assigned_writers[0]['name']) ? wad_get_name_part('first',$assigned_writers[0]['name']) : '';
+			$order_link = BASE_URL."/orders/revisions/editor?order={$order_id}&openpopup=true";
 			
 			$msg = "Hi {{editor_firstname}},<br />Your edit request for order <a href='{$order_link}'>{{order_title}} - {{order_number}}</a> has been sent successfully to the writer, {{writer_firstname}}. Revisions are due by {{due_date_time}}.<p>If you need help, contact Chris on Slack or at <a href='mailto:chris@wordagents.com'>chris@wordagents.com</a>.</p>";
 			
@@ -594,7 +673,7 @@ if( $action == 'editor_request_revision_editing_order' )  // editor_request_revi
 			$data['message'] = $msg;
 			$data['to'] = $editor_email;
 			// $data['debug'] = 1;
-			
+			$email_sent = 0;
 			$send_email_response = wad_send_email($data);
 			// if( mail($employee_email, $subject, $msg, $headers) ){
 			if( $send_email_response == 'sent'){
@@ -615,7 +694,8 @@ if( $action == 'editor_request_revision_editing_order' )  // editor_request_revi
 } // END - editor_request_revision_editing_order
 
 
-if( $action == 'writer_submit_revisions_order' )  // writer_submit_revisions_order - START
+// Writer submits editor_revision order - START
+if( $action == 'writer_submit_revisions_order' )
 {
 	$order_id = $_GET['order'];
 	$employee_id = $_GET['employee'];
@@ -625,7 +705,7 @@ if( $action == 'writer_submit_revisions_order' )  // writer_submit_revisions_ord
 	$assigned_writers = $assigned_writers_editors['writers'];
 	$assigned_editors = $assigned_writers_editors['editors'];
 
-	$writer_firstname = wad_get_name_part('first',$assigned_writers[0]['name']);
+	$writer_firstname = isset($assigned_writers[0]['name']) ? wad_get_name_part('first',$assigned_writers[0]['name']) : '';
 
 	$order = wad_get_order($order_id);
 	$order_title = $order['order_title'];
@@ -643,11 +723,11 @@ if( $action == 'writer_submit_revisions_order' )  // writer_submit_revisions_ord
 	$args = array(
 		'add' => array('editing_orders_count'),
 		'add_user_spp_id' => $employee_id,
-		'subtract' => array('revision_orders_count'),
+		'subtract' => array('editor_revision_orders_count'),
 		'subtract_user_spp_id' => $employee_id,
 		'add_2' => array('editing_orders_count'),
 		'add_user_spp_id_2' => $assigned_editors[0]['spp_id'],
-		'subtract_2' => array('revision_orders_count'),
+		'subtract_2' => array('editor_revision_orders_count'),
 		'subtract_user_spp_id_2' => $assigned_editors[0]['spp_id'],
 	);
 	wad_set_users_order_total_count($args);
@@ -673,7 +753,8 @@ if( $action == 'writer_submit_revisions_order' )  // writer_submit_revisions_ord
 				continue;
 			
 			$subject = "Edits completed by writer: Order {$order_id}";
-			$order_link = "https://app.wordagents.com/orders/".$order_id;
+			//$order_link = "https://app.wordagents.com/orders/".$order_id;
+			$order_link = BASE_URL."/orders/editing?order={$order_id}&openpopup=true";
 
 			$msg = "Hi {{editor_firstname}},<br />{{writer_firstname}} has completed your edits for order <a href='{$order_link}'>{{order_title}} - {{order_number}}</a>. Please review by {{editor_due_date_time}}.<p>If additional edits are needed and the order is due in <strong>LESS than 2 days</strong>, please send it to Final Review. Otherwise, please resend to {{writer_firstname}}.</p><p>Or, if the order is complete, please deliver to the client.</p><p>If you need help, contact Chris on Slack or at <a href='mailto:chris@wordagents.com'>chris@wordagents.com</a></p>.";
 			
@@ -688,7 +769,7 @@ if( $action == 'writer_submit_revisions_order' )  // writer_submit_revisions_ord
 			$data['message'] = $msg;
 			$data['to'] = $editor_email;
 			// $data['debug'] = 1;
-			
+			$email_sent = 0;
 			$send_email_response = wad_send_email($data);
 			// if( mail($editor_email, $subject, $msg, $headers) ){
 			if( $send_email_response == 'sent'){
@@ -709,7 +790,7 @@ if( $action == 'writer_submit_revisions_order' )  // writer_submit_revisions_ord
 	header("Location: ".BASE_URL."/orders/editing");
 	
 	
-} // END - writer_submit_revisions_order
+} // END - // Writer submits editor_revision order
 
 
 if( $action == 'send_message' ){  // send_message - START
@@ -753,16 +834,34 @@ if( $action == 'admin_add_user' ){ // Add User by Admin
 		$message = "User already exist with this email address.";
 		$message_type = 'danger';
 	}else{
+		
+		$role = $_POST['role'];
+		$spp_id = $_POST['spp_id'];
+		$weekly_quota = isset($_POST['weekly_quota']) ? $_POST['weekly_quota'] : 0;
+		$enable_weekly_quota = isset($_POST['enable_weekly_quota']) ? $_POST['enable_weekly_quota'] : 0;
+		$onetime_quota = isset($_POST['onetime_quota']) ? $_POST['onetime_quota'] : 0;
+		$enable_onetime_quota = isset($_POST['enable_onetime_quota']) ? $_POST['enable_onetime_quota'] : 0;
+		$enable_claim = isset($_POST['enable_claim']) ? $_POST['enable_claim'] : 1;
+		$editor_revision_count_limit = isset($_POST['editor_revision_count_limit']) ? $_POST['editor_revision_count_limit'] : 0;
+		$claim_one_order = isset($_POST['claim_one_order']) ? $_POST['claim_one_order'] : 0;
+		$is_archive = $_POST['is_archive'];
+		
 		wad_insert_query(
 			"spp_team",
-			array('email','role','spp_id', 'weekly_quota'),
-			array($email, $_POST['role'], $_POST['spp_id'], $_POST['weekly_quota'])
+			array('email','role','spp_id', 'weekly_quota', 'enable_weekly_quota', 'onetime_quota', 'enable_onetime_quota', 'enable_claim', 'is_archive', 'editor_revision_count_limit', 'claim_one_order'),
+			array($email, $role, $spp_id, $weekly_quota, $enable_weekly_quota, $onetime_quota, $enable_onetime_quota, $enable_claim, $is_archive, $editor_revision_count_limit, $claim_one_order)
 		);
 		
-		header("Location: ".BASE_URL."/admin/users/add");
+		header("Location: ".BASE_URL."/users/add");
 	}
+}
 
+if( $action == 'delete_user' ){ // Delete User by Admin
 
+	$user_spp_id = $_REQUEST['user'];
+	wad_delete_query("users", "spp_id='{$user_spp_id}'");
+	wad_delete_query("spp_team", "spp_id='{$user_spp_id}'");
+	header("Location: ".BASE_URL."/users");
 }
 
 if( $action == 'editor_submit_editing_order' )  // editor_submit_editing_order - START
@@ -857,7 +956,8 @@ if( $action == 'editor_submit_editing_order' )  // editor_submit_editing_order -
 			$order_client_first_name = ($post['client_first_name'] == '(empty)') ? 'client' : $post['client_first_name'];
 			
 			$subject = "Order submitted: {$order_id}";
-			$order_link = "https://app.wordagents.com/orders/".$order_id;
+			// $order_link = "https://app.wordagents.com/orders/".$order_id;
+			$order_link = BASE_URL."/orders/complete?order={$order_id}&openpopup=true";
 			
 			$msg = "Hi {{editor_firstname}},<br />Order <a href='{$order_link}'>{{order_title}} - {{order_number}}</a> has been successfully submitted to the client. Thank you!<p>To claim new orders, go to the <a href='{{link_to_OG_new_orders}}'>self-service dashboard</a></p><p>If you need help, contact Chris on Slack or at <a href='mailto:chris@wordagents.com'>chris@wordagents.com</a>.</p>";
 	
@@ -893,7 +993,8 @@ if( $action == 'editor_submit_editing_order' )  // editor_submit_editing_order -
 			$writer_firstname = wad_get_name_part('first',$writer['name']);
 
 			$subject = "Order complete: {$order_id}";
-			$order_link = "https://app.wordagents.com/orders/".$order_id;
+			// $order_link = "https://app.wordagents.com/orders/".$order_id;
+			$order_link = BASE_URL."/orders/complete?order={$order_id}&openpopup=true";
 
 			$msg = "Hi {{writer_firstname}},<br />Order <a href='{$order_link}'>{{order_title}} - {{order_number}}</a> is complete and has been submitted to the client. Thank you!<p>To claim new orders, go to the <a href='{{link_to_OG_new_orders}}'>self-service dashboard</a>.</p><p>If you need help, contact <a href='mailto:talent@wordagents.com'>talent@wordagents.com</a></p>";
 			
@@ -949,7 +1050,6 @@ if( $action == 'editor_submit_editing_order' )  // editor_submit_editing_order -
 		
 		$template = isset($_POST['order_complete_client_email_template']) ? $_POST['order_complete_client_email_template'] : 1;
 		$msg = ${"template_".$template};
-		echo $msg;
 			
 		// NEW EMAIL SMTP
 		$data['subject'] = $subject;
@@ -966,6 +1066,24 @@ if( $action == 'editor_submit_editing_order' )  // editor_submit_editing_order -
 			$to = "Client";
 			wad_save_email_log($from, $to, $subject, $msg, $order_id);
 		}
+		
+		$staff_only = 0;
+		$post = array(
+			"message" => $msg,
+			"user_id" => $employee_id,
+			"staff_only" => $staff_only
+		);
+		
+		wad_add_spp_order_message($order_id, $post);
+		
+		if( wad_get_option('save_log') == 'yes' )
+		{
+			wad_insert_query( "logs",
+				array( "from_type", "from_id", "action", "source", "source_id", "time", "to_type", "to_id", "data" ),
+				array( "user", $employee_id, "send_message", "order", $order_id, time(), "user", $employee_id, $staff_only)
+			);
+		}	
+		
 	}
 
 	header("Location: ".BASE_URL."/orders/complete");
@@ -994,15 +1112,39 @@ if( $action == 'profile_form_submit' )  // profile_form_submit - START
 
 if( $action == 'admin_edits_user' )  // admin_edits_user - START
 {
+	$spp_id = $_POST['spp_id'];	
+
 	$name = $_POST['name'];
 	$email = $_POST['email'];
-	$weekly_quota = $_POST['weekly_quota'];
-	$spp_id = $_POST['spp_id'];	
 	
-	$set = "name='{$name}', email='{$email}', weekly_quota='{$weekly_quota}'";
-	wad_update_query("users", $set, "spp_id='{$spp_id}'");
+	$weekly_quota = isset($_POST['weekly_quota']) ? $_POST['weekly_quota'] : '';
+	$enable_weekly_quota = isset($_POST['enable_weekly_quota']) ? $_POST['enable_weekly_quota'] : '';	
+	$onetime_quota = isset($_POST['onetime_quota']) ? $_POST['onetime_quota'] : '';
+	$enable_onetime_quota = isset($_POST['enable_onetime_quota']) ? $_POST['enable_onetime_quota'] : '';
 	
-	header("Location: ".BASE_URL."/admin/users/edit/".$spp_id);
+	$editor_revision_count_limit = isset($_POST['editor_revision_count_limit']) ? $_POST['editor_revision_count_limit'] : '';
+	$claim_one_order = isset($_POST['claim_one_order']) ? $_POST['claim_one_order'] : '';
+	
+	$enable_claim = isset($_POST['enable_claim']) ? $_POST['enable_claim'] : '';
+	$is_archive = $_POST['is_archive'];	
+	
+	
+	$set = array(
+		'name' => $name,
+		'email' => $email,
+		'weekly_quota' => $weekly_quota,
+		'enable_weekly_quota' => $enable_weekly_quota,
+		'onetime_quota' => $onetime_quota,
+		'enable_onetime_quota' => $enable_onetime_quota,
+		'editor_revision_count_limit' => $editor_revision_count_limit,
+		'claim_one_order' => $claim_one_order,
+		'enable_claim' => $enable_claim,
+		'is_archive' => $is_archive
+	);
+	
+	wad_update_user($spp_id, $set);
+	
+	header("Location: ".BASE_URL."/users/edit/".$spp_id);
 	
 }   // admin_edits_user - END
 
@@ -1037,7 +1179,7 @@ if( $action == 'add_tag' )  // add_tag - START
 
 	wad_spp_update_order($order_id, $post);
 	
-	wad_add_update_tags_to_order($order_id, $tags_add);
+	// wad_add_update_tags_to_order($order_id, $tags_add);
 	
 	if( in_array("Final Review", $tags_add) ){
 		wad_insert_query( "order_final_review",
@@ -1059,7 +1201,7 @@ if( $action == 'add_tag' )  // add_tag - START
 		{
 			wad_insert_query( "logs",
 				array( "from_type", "from_id", "action", "source", "source_id", "time", "data"),
-				array( "system", $employee_id, "Added tag", "order", $order_id, time(), $tag)
+				array( "user", $employee_id, "Added tag", "order", $order_id, time(), $tag)
 			);
 		}
 	}
@@ -1138,13 +1280,7 @@ if( $action == "back_to_admin" )
 	
 	setCookie('wad_user_logged_in_spp_id',$_COOKIE['wad_admin_logged_in_spp_id'], strtotime( '+10 years' ));
 	
-	header("Location: ".BASE_URL."/admin");
+	header("Location: ".BASE_URL);
 	exit;
 	
-}
-
-
-if( $action == 'signout_test' ){
-	setCookie('wad_user_logged_in',false, strtotime( '+10 years' ));
-	setCookie('wad_admin_logged_in_spp_id',false, strtotime( '+10 years' ));		
 }

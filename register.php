@@ -36,14 +36,11 @@
 								<p class="text-muted font-weight-bold">Enter your details to create your account</p>
 							</div>
 							<!--begin::Form-->
-							<form class="form" novalidate="novalidate" id="kt_login_signup_form" method="post">															<?php								$name = $email = '';								if( $message ){									if( $message_type != 'success' ){										$name = isset($_POST['fullname']) && $_POST['fullname'] ? $_POST['fullname'] : '';										$email = isset($_POST['email']) && $_POST['email'] ? $_POST['email'] : '';									}									echo wad_message($message, $message_type);								}								?>							
+							<form class="form" novalidate="novalidate" id="kt_login_signup_form" method="post">															<?php								$name = $email = $role = '';								if( $message ){									if( $message_type != 'success' ){										$name = isset($_POST['fullname']) && $_POST['fullname'] ? $_POST['fullname'] : '';										$email = isset($_POST['email']) && $_POST['email'] ? $_POST['email'] : '';										$role = isset($_POST['role']) && $_POST['role'] ? $_POST['role'] : '';									}									echo wad_message($message, $message_type);								}																//$spp_roles = array('Admin', 'Customer Success', 'Contractor', 'Writer', 'Team Leader', 'Director of Content Operations', 'Editor', 'Assigner');								$spp_roles = array('Admin', 'Writer', 'Editor', 'Assigner');																?>							
 								<div class="form-group">
 									<input class="form-control form-control-solid h-auto py-5 px-6" type="text" placeholder="Full Name" name="fullname" value="<?php echo $name; ?>" />
 								</div>
-								<div class="form-group">
-									<input class="form-control form-control-solid h-auto py-5 px-6" type="email" placeholder="Email" name="email" value="<?php echo $email; ?>" />
-								</div>
-								<div class="form-group">
+								<div class="form-group">									<input class="form-control form-control-solid h-auto py-5 px-6" type="email" placeholder="Email" name="email" value="<?php echo $email; ?>" />								</div>								<div class="form-group">									<select class="form-control" name="role" id="exampleSelect1">										<option value="">Select Role</option>										<?php foreach($spp_roles as $spp_role): ?>										<option value="<?php echo $spp_role; ?>"<?php if($role==$spp_role){echo " selected";} ?>><?php echo $spp_role; ?></option>										<?php endforeach; ?>									</select>								</div>								<div class="form-group">
 									<input class="form-control form-control-solid h-auto py-5 px-6" type="password" placeholder="Password" name="password"/>
 								</div>
 								<div class="form-group">

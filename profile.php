@@ -1,4 +1,4 @@
-<?php wad_header(); global $current_user; ?>
+<?php wad_header(); global $globals, $current_user; ?>
 <div class="content d-flex flex-column flex-column-fluid" id="kt_content">
 	<?php /* <!--begin::Subheader-->
 	<div class="subheader py-2 py-lg-4 subheader-transparent" id="kt_subheader">
@@ -56,7 +56,10 @@
 							<div><?php echo $current_user['spp_id']; ?></div>
 						</div>*/ ?>
 						<div class="form-group">
-							<label>Weekly Quota:</label>
+							<label>
+								<?php echo $globals['weekly_quota_label']; ?>
+								<span class="form-text text-muted"><?php echo $globals['weekly_quota_desc']; ?></span>
+							</label>
 							<input type="text" class="form-control" name="weekly_quota" disabled value="<?php echo $current_user['weekly_quota']; ?>" />
 						</div>
 						<input type="hidden" name="id" value="<?php echo $current_user['id']; ?>" />

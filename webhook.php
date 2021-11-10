@@ -10,6 +10,11 @@ if( $action == 'wad_zaiper_created_google_doc')  // wad_zaiper_created_google_do
 	$doc_link = str_replace(array('drive','file'), array('docs','document'),$doc_link);
 	
 	wad_update_query("orders", "doc_link='{$doc_link}'", "order_id='{$order_id}'");
+
+	wad_insert_query( "order_docs",
+		array( "order_id", "doc_link"),
+		array( $order_id, $doc_link)
+	);
 	
 	if( wad_get_option('save_log') == 'yes' )
 	{

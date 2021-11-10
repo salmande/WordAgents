@@ -1289,8 +1289,9 @@ $email = $current_user['email'];
 	</body>
 	<!--end::Body-->
 	
-	<!--begin::Modal Order Details-->
-	<div class="modal fade modal-order_details" id="modal-order-details" data-backdrop="static" tabindex="-1" role="dialog" aria-labelledby="staticBackdrop" aria-hidden="true">
+	<span class="order-details-trigger openpopup" href="javascript:;" data-order_id=""></span>
+	
+	<div class="modal fade modal-order_details" id="modal-order-details" tabindex="-1" role="dialog" aria-labelledby="staticBackdrop" aria-hidden="true">
 		<div class="modal-dialog modal-dialog-centered modal-lg" role="document">
 			<div class="modal-content">
 				<div class="modal-header">
@@ -1308,7 +1309,8 @@ $email = $current_user['email'];
 	<div class="justify-content-center position-fixed w-100 h-100 bg-light-o-100 modal-order_details-loader d-none">
 		<div class="align-self-center"><div class="spinner w-30px h-30px"></div></div>
 	</div>
-	<!--end::Modal Order Details-->
+	
+	<div id="wad-current-page-url" class="d-none"><?php echo wad_get_current_url(true) ?></div>
 	
 	<!--begin::Modal Order Complete-->
 	<div class="modal fade modal-order_complete" id="modal-order-complete" data-backdrop="static" tabindex="-1" role="dialog" aria-labelledby="staticBackdrop" aria-hidden="true">
@@ -1336,7 +1338,5 @@ $email = $current_user['email'];
 		<div class="align-self-center"><div class="spinner w-30px h-30px"></div></div>
 	</div>
 	<!--end::Modal Order Complete-->
-	
-	<div id="wad-current-page-url" class="d-none"><?php echo wad_get_current_url(true) ?></div>
 	
 </html>

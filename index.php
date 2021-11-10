@@ -32,82 +32,123 @@ require 'functions.php';
 global $wad_url;
 
 $wad_url = isset($_GET['url']) ? $_GET['url'] : 'home'; //home
-
+$redirect_to_home = false;
+	
 //remove last slash if exists
-if(substr($wad_url, -1) == '/') {
+if(substr($wad_url, -1)=='/') {
     $wad_url = substr($wad_url, 0, -1);
 }
 
-//Load all orders page in place of home page
-if( $wad_url == 'home' )
-{
-	if( is_writer() || is_editor() )
-	$wad_url = 'orders';
-}
+$wad_url_pieces = explode('/',$wad_url);
 
-//Load all users page in place of admin page
-if( is_admin() && $wad_url == 'admin' )
+if( $wad_url=='home' )
 {
-	$wad_url = 'admin/users/all';
+	if( (is_admin() || is_assigner() ))
+	{
+		$wad_url = 'users';
+	}
+	else if( is_writer() || is_editor() )
+	{
+		$wad_url = 'orders';
+	}
 }
-
-// "/orders" finds orders directory first. if found, run /orders/index.php so replaceing orders with wad-orders directory name in order to run from root index.php to load orders.
-if( strpos($wad_url, 'orders') !== false )
+else if( $wad_url_pieces[0]=='orders' )
 {
-	$wad_url_array = explode('/',$wad_url);
-	$wad_url_array[0] = str_replace('orders','wad-orders',$wad_url_array[0]);
-	$wad_url = implode('/',$wad_url_array);
+	if( !isset($wad_url_pieces[1]) ){ // /orders
+		if( is_admin() || is_assigner() ){
+			$wad_url = 'wad-orders/all';
+		}
+	}else{
+		
+		if( (is_writer() || is_editor())
+			&& ( $wad_url_pieces[1]=='new'
+				|| $wad_url_pieces[1]=='overdue'
+				|| $wad_url_pieces[1]=='stuck'
+				|| $wad_url_pieces[1]=='ready_to_edit'
+				|| $wad_url_pieces[1]=='editor_revision'
+				|| $wad_url_pieces[1]=='revision'
+			)
+		){
+			$redirect_to_home = true;
+		}
+		
+		$wad_url_pieces[0] = str_replace('orders','wad-orders',$wad_url_pieces[0]);
+		$wad_url = implode('/',$wad_url_pieces);
+	}
 }
-
-// checking cronjob into url if found load wad-cronjob folder
-if( strpos($wad_url, 'cronjob') !== false )
+else if( $wad_url_pieces[0]=='cronjob' )
 {
-	$wad_url_array = explode('/',$wad_url);
-	$wad_url_array[0] = str_replace('cronjob','wad-cronjob',$wad_url_array[0]);
-	$wad_url = implode('/',$wad_url_array);
+	$wad_url_pieces[0] = str_replace('cronjob','wad-cronjob',$wad_url_pieces[0]);
+	$wad_url = implode('/',$wad_url_pieces);
 }
-
-// admin pages ( found 'admin' in URL )
-if( strpos($wad_url, 'admin') !== false )
+else if( $wad_url_pieces[0]=='stats' )
 {
-	$wad_url_array = explode('/',$wad_url);
-	$wad_url_array[0] = str_replace('admin','wad-admin',$wad_url_array[0]);
-	$wad_url = implode('/',$wad_url_array);
+	if( is_admin() )
+	{
+		if( !isset($wad_url_pieces[1]) ){ // /stats
+			$wad_url = 'wad-stats/writers';
+		}else{
+			$wad_url_pieces[0] = str_replace('stats','wad-stats',$wad_url_pieces[0]);
+			$wad_url = implode('/',$wad_url_pieces);
+		}
+	}else{
+		$redirect_to_home = true;
+	}
+}
+else if( $wad_url_pieces[0]=='users' )
+{
+	if( is_admin() || is_assigner() )
+	{
+		
+		if( isset($wad_url_pieces[1]) ){
+			$wad_url_pieces[0] = str_replace('users','wad-users',$wad_url_pieces[0]);
+			$wad_url = implode('/',$wad_url_pieces);
+		}
+		
+		if( isset($wad_url_pieces[1]) && $wad_url_pieces[1]=='edit' ){ // /users/edit
+			// if( is_admin() ){
+				$wad_url = $wad_url_pieces[0].'/'.$wad_url_pieces[1];
+			// }else{
+				// $redirect_to_home = true;
+			// }
+		}
+
+		if( isset($wad_url_pieces[1]) && $wad_url_pieces[1]=='add' ){ // /users/add
+			// if( is_admin() ){
+				$wad_url = $wad_url_pieces[0].'/'.$wad_url_pieces[1];
+			// }else{
+				// $redirect_to_home = true;
+			// }
+		}
+	}else{
+		$redirect_to_home = true;
+	}
+}
+else if( $wad_url_pieces[0]=='settings' )
+{
+	if( is_writer() || is_editor() ){
+		$redirect_to_home = true;
+	}
+	$wad_url_pieces[0] = str_replace('settings','wad-settings',$wad_url_pieces[0]);
+	$wad_url = implode('/',$wad_url_pieces);
 	
-	// Redirect to home if not admin logged-in
-	if( ! is_admin() ){
-		header("Location: ".BASE_URL);
-		die();
-	}
-}else{
-	// not admin pages redirect to admin
-	if( is_admin() && $wad_url != 'ajax' ){
-		header("Location: ".BASE_URL."/admin");
-		die();
-	}
+	if( $wad_url=='wad-settings')
+		$wad_url = 'settings';
+	
 }
 
-if( $wad_url == 'wad-orders' ){
-	$wad_url = 'orders';
-}
-if( $wad_url == 'wad-admin' ){
-	$wad_url = 'wad-admin/index';
-}
-
-if( strpos($wad_url, 'wad-admin/users/edit/') !== false ){
-	$wad_url = 'wad-admin/users/edit';
-}
+if( $redirect_to_home )
+header("Location: ".BASE_URL);
 
 // checking into url, webhook or cronjob 
 $webhook = strpos($wad_url, 'webhook');
 $cronjob = strpos($wad_url, 'wad-cronjob');
+$neither_webhook_nor_cronjob_url = $webhook === false && $cronjob === false;
 
-// neither webhook nor cronjob
-$a = $webhook === false && $cronjob === false;
-if($a)
+if($neither_webhook_nor_cronjob_url)
 {
-	$protocol = ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] != 'off') || $_SERVER['SERVER_PORT'] == 443) ? "https://" : "http://";  
-	$request_uri = $protocol . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];  
+	$protocol = ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] != 'off') || $_SERVER['SERVER_PORT']==443) ? "https://" : "http://";  
+	$request_uri = $protocol . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI']; 
 	
 	// checking into url, login or register or forgot or reset pages 
 	$login = strpos($wad_url, 'login');
@@ -118,7 +159,7 @@ if($a)
 	//either login or register or forgot or reset
 	$is_login_register_forgot_reset_page = $login !== false || $register !== false || $forgot !== false || $reset !== false;
 
-	if( is_user_logged_in() ){	
+	if( is_user_logged_in() ){
 		if ( $is_login_register_forgot_reset_page ) { 
 			header("Location: ".BASE_URL);
 			die();
@@ -126,14 +167,18 @@ if($a)
 	}else{
 		if ( $is_login_register_forgot_reset_page ) { 
 			// do nothing
-		}else{
-			header("Location: ".BASE_URL."/login?redirect_to=".urlencode($request_uri));
+		}else{			
+			$redirect_url = BASE_URL."/login";
+			if( $request_uri != BASE_URL.'/' ){
+				$redirect_url .= "?redirect_to=".urlencode($request_uri);
+			}
+			header("Location: ".$redirect_url);
 			die();
 		}
 	}
 }
 
-if( wad_get_option('send_emails') == 'yes' )
+if( wad_get_option('send_emails')=='yes' ) 
 {	
 	require 'PHPMailer/src/Exception.php';
 	require 'PHPMailer/src/PHPMailer.php';
@@ -144,18 +189,21 @@ if( wad_get_option('send_emails') == 'yes' )
 
 	// wad_send_new_submitted_orders_email();
 	
+	
 	// Email for working orders within last 6 hours.
+	if( SITE_MOD=='Live' )
 	wad_send_email_for_working_orders();
 	
 }
 
-if( wad_get_option('reject_order') == 'yes' )
+if( wad_get_option('reject_order')=='yes' )
 {
 	//Change Order status to Instruction Review after 48 hours if no claim
 	//wad_update_submitted_orders(); //removed this functionality for now
 	
 	//Order is being rejected after 48 hours of claim and added to available list to reclaim
-	wad_update_working_orders(); 
+	wad_update_working_orders();
+		
 }
 
 require 'action.php';
@@ -165,6 +213,17 @@ if( is_user_logged_in() )
 	$globals['wad_url'] = $wad_url;
 	require 'globals.php';
 	require 'data.php';	
+	
+	// Logout account if archive
+	$is_archive = $globals['current_user']['is_archive'];
+	if( $is_archive )
+	{
+		setCookie('wad_user_logged_in',false, strtotime( '+10 years' ));
+		setCookie('wad_user_logged_in_spp_id',false, strtotime( '+10 years' ));
+		
+		header("Location: ".BASE_URL);
+	}
+	
 }
 
 $file = $wad_url.'.php';
